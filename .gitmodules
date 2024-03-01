@@ -1,0 +1,3 @@
+[submodule "dysts"]
+	path = dysts
+	url = git@github.com:nrxszvo/dysts-sm.git
