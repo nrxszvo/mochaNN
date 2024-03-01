@@ -1,0 +1,7 @@
+__pycache__/
+lightning_logs/
+datasets/
+predictions/
+cfg*yml
+*.ckpt
+
