@@ -1,14 +1,17 @@
 import lightning as L
 import torch
 import torch.nn as nn
-from nhits import NHITS
+from lightning.pytorch.callbacks import ModelCheckpoint, TQDMProgressBar
+from lightning.pytorch.loggers import TensorBoardLogger
+from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 
-from lightning.pytorch.callbacks import TQDMProgressBar, ModelCheckpoint
+from nhits import NHITS
 
 
 class NeuralChaosModule(L.LightningModule):
     def __init__(
         self,
+        name,
         h,
         input_size,
         step_size,
@@ -16,7 +19,7 @@ class NeuralChaosModule(L.LightningModule):
         loss,
         max_steps,
         val_check_steps,
-        lr_schedule_params,
+        lr_scheduler_params,
         random_seed,
     ):
         super().__init__()
@@ -31,16 +34,18 @@ class NeuralChaosModule(L.LightningModule):
         else:
             raise Exception
         self.val_check_steps = val_check_steps
-        self.lr_scheduler_params = lr_schedule_params
+        self.lr_scheduler_params = lr_scheduler_params
         self.max_steps = max_steps
+        logger = TensorBoardLogger(".", version=name)
         self.trainer_kwargs = {
+            "logger": logger,
             "max_steps": max_steps,
             "val_check_interval": val_check_steps,
             "check_val_every_n_epoch": None,
             "callbacks": [
                 TQDMProgressBar(),
                 ModelCheckpoint(
-                    dirpath=".", filename="latest_model", save_weights_only=True
+                    dirpath="models", filename=name, save_weights_only=True
                 ),
             ],
         }
@@ -48,24 +53,23 @@ class NeuralChaosModule(L.LightningModule):
     def configure_optimizers(self):
         lr = self.lr_scheduler_params["lr"]
         optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-
-        schedtype = self.lr_scheduler_params["scheduler"]
-        if schedtype == "ReduceLROnPlateau":
+        name = self.lr_scheduler_params["name"]
+        if name == "ReduceLROnPlateau":
             gamma = self.lr_scheduler_params["gamma"]
             threshold = self.lr_scheduler_params["threshold"]
             patience = self.lr_scheduler_params["patience"]
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            scheduler = ReduceLROnPlateau(
                 optimizer=optimizer,
                 factor=gamma,
                 threshold=threshold,
                 patience=patience,
             )
             freq = self.val_check_steps
-        elif schedtype == "StepLR":
+        elif name == "StepLR":
             gamma = self.lr_scheduler_params["gamma"]
             num_decay = self.lr_scheduler_params["num_lr_decays"]
             step_size = int(self.max_steps / num_decay)
-            scheduler = torch.optim.lr_scheduler.StepLR(
+            scheduler = StepLR(
                 optimizer=optimizer,
                 step_size=step_size,
                 gamma=gamma,
@@ -92,7 +96,6 @@ class NeuralChaosModule(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        # Model Predictions
         pred = self([batch["input"]])
         valid_loss = self.loss(pred, batch["target"])
 

@@ -1,6 +1,7 @@
 __pycache__/
 lightning_logs/
 datasets/
+models/
 predictions/
 cfg*yml
 *.ckpt
