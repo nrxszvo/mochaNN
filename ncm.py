@@ -36,18 +36,13 @@ class NeuralChaosModule(L.LightningModule):
         self.val_check_steps = val_check_steps
         self.lr_scheduler_params = lr_scheduler_params
         self.max_steps = max_steps
+        self.name = name
         logger = TensorBoardLogger(".", version=name)
         self.trainer_kwargs = {
             "logger": logger,
             "max_steps": max_steps,
-            "val_check_interval": val_check_steps,
+            "val_check_interval": min(val_check_steps, max_steps),
             "check_val_every_n_epoch": None,
-            "callbacks": [
-                TQDMProgressBar(),
-                ModelCheckpoint(
-                    dirpath="models", filename=name, save_weights_only=True
-                ),
-            ],
         }
 
     def configure_optimizers(self):
@@ -90,9 +85,9 @@ class NeuralChaosModule(L.LightningModule):
     def training_step(self, batch, batch_idx):
         pred = self([batch["input"]])
         loss = self.loss(pred, batch["target"])
-        self.log("train_loss", loss, prog_bar=True, on_epoch=True)
+        self.log("train_loss", loss, prog_bar=True, on_epoch=True, sync_dist=True)
         cur_lr = self.trainer.optimizers[0].param_groups[0]["lr"]
-        self.log("lr", cur_lr, prog_bar=True, on_epoch=True)
+        self.log("lr", cur_lr, prog_bar=True, on_epoch=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -102,18 +97,24 @@ class NeuralChaosModule(L.LightningModule):
         if torch.isnan(valid_loss):
             raise Exception("Loss is NaN, training stopped.")
 
-        self.log("valid_loss", valid_loss, prog_bar=True, on_epoch=True)
-        return valid_loss
+        self.log("valid_loss", valid_loss, prog_bar=True, on_epoch=True, sync_dist=True)
+        return {"valid_loss": valid_loss}
 
     def predict_step(self, batch, batch_idx):
         return self([batch["input"]])
 
     def fit(self, datamodule):
-        trainer = L.Trainer(**self.trainer_kwargs)
+        callbacks = [
+            TQDMProgressBar(),
+            ModelCheckpoint(
+                dirpath="models", filename=self.name, save_weights_only=True
+            ),
+        ]
+        trainer = L.Trainer(callbacks=callbacks, **self.trainer_kwargs)
         trainer.fit(self, datamodule=datamodule)
 
     def predict(self, datamodule):
-        trainer = L.Trainer(**self.trainer_kwargs)
+        trainer = L.Trainer(callbacks=[TQDMProgressBar()], **self.trainer_kwargs)
         pred = trainer.predict(self, datamodule)
         yt_raw = torch.from_numpy(datamodule.testset.series)
 

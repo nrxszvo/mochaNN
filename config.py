@@ -1,4 +1,3 @@
-import os
 import yaml
 
 
@@ -8,7 +7,7 @@ class ConfigObj:
             self.__dict__[key] = entries[key]
 
 
-def get_config(ymlfn, tag="default"):
-    with open(os.path.join(ymlfn)) as f:
+def get_config(ymlfn):
+    with open(ymlfn) as f:
         config = yaml.load(f, Loader=yaml.CLoader)
     return ConfigObj(**config)
