@@ -5,10 +5,11 @@ import numpy as np
 import torch
 
 from config import get_config
-from dataset import NCMDataModule
+from ncmdataset import NCMDataModule
 from ncm import NeuralChaosModule
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('--cfg', required=True, help='yaml config file')
 parser.add_argument("--cp", required=True, help="checkpoint file")
 parser.add_argument(
     "--outfn",
@@ -20,7 +21,7 @@ parser.add_argument(
 def main():
     args = parser.parse_args()
     cpfn = args.cp
-    cfgfn = cpfn.replace("ckpt", "yml")
+    cfgfn = args.cfg
     outfn = args.outfn
     if outfn is None:
         outfn = cpfn.replace("ckpt", "npy")
@@ -31,6 +32,11 @@ def main():
         torch.float32 if cfgyml.dtype == "float32" else torch.float64
     )
 
+    if isinstance(cfgyml.batch_size, list):
+        batch_size = cfgyml.batch_size[0]
+    else:
+        batch_size = cfgyml.batch_size
+
     datamodule = NCMDataModule(
         cfgyml.datafile,
         cfgyml.dtype,
@@ -40,7 +46,7 @@ def main():
         cfgyml.npts,
         cfgyml.input_size,
         cfgyml.H,
-        cfgyml.batch_size,
+        batch_size,
         os.cpu_count() - 1,
     )
 

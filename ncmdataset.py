@@ -51,8 +51,6 @@ class NCMDataModule(L.LightningDataModule):
         self.h = h
         self.batch_size = batch_size
         self.num_workers = num_workers
-
-    def prepare_data(self):
         self._data = np.load(self.datafile, allow_pickle=True).item()
         self.series = self._data["data"].astype(self.dtype, copy=False)
         del self._data["data"]

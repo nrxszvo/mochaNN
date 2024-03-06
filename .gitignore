@@ -4,4 +4,5 @@ datasets/
 models/
 predictions/
 *.ckpt
+*.swp
 

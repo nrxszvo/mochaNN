@@ -30,7 +30,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--save_path",
-    default="/mnt/nrxszvo-disk/predictions",
+    default="outputs",
     help="folder for saving predictions",
 )
 parser.add_argument(
@@ -40,7 +40,7 @@ parser.add_argument(
 )
 
 
-def tune_hps(name, get_ncm, get_dm, cfgyml, datafile):
+def tune_hps(save_path, name, get_ncm, get_dm, cfgyml, datafile):
     def fit(config):
         nhits_params = {
             "n_stacks": config["n_stacks"],
@@ -87,7 +87,7 @@ def tune_hps(name, get_ncm, get_dm, cfgyml, datafile):
     run_config = RunConfig(
         name=name,
         progress_reporter=reporter,
-        storage_path="/mnt/nrxszvo-disk/ray_results",
+        storage_path=os.path.abspath(f"{save_path}/ray_results"),
         checkpoint_config=CheckpointConfig(
             num_to_keep=1,
             checkpoint_score_attribute="valid_loss",
@@ -122,9 +122,9 @@ def tune_hps(name, get_ncm, get_dm, cfgyml, datafile):
 def main():
     args = parser.parse_args()
     cfgyml = get_config(args.cfg)
-    os.makedirs("models", exist_ok=True)
+    os.makedirs(args.save_path, exist_ok=True)
     if args.save:
-        shutil.copyfile(args.cfg, f"models/{args.outfn}.yml")
+        shutil.copyfile(args.cfg, f"{args.save_path}/{args.outfn}.yml")
 
     torch.set_default_dtype(
         torch.float32 if cfgyml.dtype == "float32" else torch.float64
@@ -161,14 +161,21 @@ def main():
 
     if args.tune:
         datafile = os.path.abspath(cfgyml.datafile)
-        results = tune_hps(args.outfn, get_ncm, get_datamodule, cfgyml, datafile)
+        results = tune_hps(
+            args.save_path, args.outfn, get_ncm, get_datamodule, cfgyml, datafile
+        )
         print("best hps found:")
         for k, v in results.get_best_result().config["train_loop_config"].items():
             print(f"\t{k}:\t{v}")
+
         if args.save:
             dm = get_datamodule(cfgyml.batch_size[0], datafile)
             cp_obj = results.get_best_result().checkpoint
             cp = cp_obj.path + "/checkpoint.ckpt"
+            model_path = f"{args.save_path}/models"
+            os.makedirs(model_path, exist_ok=True)
+            shutil.copyfile(cp, f"{model_path}/{args.outfn}.ckpt")
+            breakpoint()
             ncm = NeuralChaosModule.load_from_checkpoint(cp)
     else:
         ncm = get_ncm(cfgyml.nhits_params, cfgyml.lr_scheduler_params)
@@ -177,9 +184,10 @@ def main():
 
     if args.save:
         y_hat, y_true = ncm.predict(dm)
-        datafile = f"{args.save_path}/{args.outfn}.npy"
+        datadir = f"{args.save_path}/predictions"
+        os.makedirs(datadir, exist_ok=True)
         np.save(
-            datafile,
+            f"{datadir}/{args.outfn}.npy",
             {
                 "config": cfgyml,
                 "y_true": y_true.numpy(),

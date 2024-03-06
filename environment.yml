@@ -1,0 +1,12 @@
+name: mochaNN
+channels:
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.11
+  - numpy
+  - pytorch
+  - pytorch-cuda=12.1
+  - lightning
+  - ray-train
+  - ray-tune

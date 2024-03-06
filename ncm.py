@@ -114,7 +114,7 @@ class NeuralChaosModule(L.LightningModule):
         trainer.fit(self, datamodule=datamodule)
 
     def predict(self, datamodule):
-        trainer = L.Trainer(callbacks=[TQDMProgressBar()], **self.trainer_kwargs)
+        trainer = L.Trainer(callbacks=[TQDMProgressBar()], devices=1, **self.trainer_kwargs)
         pred = trainer.predict(self, datamodule)
         yt_raw = torch.from_numpy(datamodule.testset.series)
 
