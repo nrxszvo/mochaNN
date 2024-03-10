@@ -38,6 +38,9 @@ parser.add_argument(
     default=datetime.now().strftime("%Y%m%d%H%M%S"),
     help="prediction file name",
 )
+parser.add_argument(
+    "--ngpu", default=1, type=int, help="number of gpus per training trial"
+)
 
 
 def tune_hps(save_path, name, get_ncm, get_dm, cfgyml, datafile):
@@ -47,7 +50,8 @@ def tune_hps(save_path, name, get_ncm, get_dm, cfgyml, datafile):
             "n_pool_kernel_size": config["n_pool_kernel_size"],
             "n_freq_downsample": config["n_freq_downsample"],
             "n_blocks": config["n_blocks"],
-            "mlp_units": config["mlp_units"],
+            "mlp_layers": config["mlp_layers"],
+            "mlp_width": config["mlp_width"],
         }
         lr_scheduler_params = {
             "lr": config["lr"],
@@ -57,7 +61,7 @@ def tune_hps(save_path, name, get_ncm, get_dm, cfgyml, datafile):
             "threshold": config["threshold"],
             "min_lr": cfgyml.lr_scheduler_params["min_lr"],
         }
-        ncm = get_ncm(nhits_params, lr_scheduler_params)
+        ncm = get_ncm("it", nhits_params, lr_scheduler_params, config["batch_size"])
         trainer = L.Trainer(
             callbacks=[RayTrainReportCallback()],
             strategy=RayDDPStrategy(),
@@ -77,9 +81,9 @@ def tune_hps(save_path, name, get_ncm, get_dm, cfgyml, datafile):
         brackets=cfgyml.brackets,
     )
     scaling_config = ScalingConfig(
-        num_workers=1,
+        num_workers=cfgyml.num_workers,
         use_gpu=True,
-        resources_per_worker={"CPU": 1, "GPU": 1},
+        resources_per_worker=cfgyml.resources_per_worker,
     )
     reporter = CLIReporter(
         metric_columns=["valid_loss", "training_iteration"],
@@ -87,7 +91,6 @@ def tune_hps(save_path, name, get_ncm, get_dm, cfgyml, datafile):
     run_config = RunConfig(
         name=name,
         progress_reporter=reporter,
-        storage_path=os.path.abspath(f"{save_path}/ray_results"),
         checkpoint_config=CheckpointConfig(
             num_to_keep=1,
             checkpoint_score_attribute="valid_loss",
@@ -95,7 +98,11 @@ def tune_hps(save_path, name, get_ncm, get_dm, cfgyml, datafile):
         ),
     )
 
-    trainer = TorchTrainer(fit, scaling_config=scaling_config, run_config=run_config)
+    trainer = TorchTrainer(
+        fit,
+        scaling_config=scaling_config,
+        run_config=run_config,
+    )
     lr_params = cfgyml.lr_scheduler_params
     nhits_params = cfgyml.nhits_params
     search_space = {
@@ -103,17 +110,27 @@ def tune_hps(save_path, name, get_ncm, get_dm, cfgyml, datafile):
         "lr": tune.grid_search(lr_params["lr"]),
         "gamma": tune.grid_search(lr_params["gamma"]),
         "threshold": tune.grid_search(lr_params["threshold"]),
+        "min_lr": tune.grid_search(lr_params["min_lr"]),
         "n_stacks": tune.choice([nhits_params["n_stacks"]]),
         "n_pool_kernel_size": tune.grid_search(nhits_params["n_pool_kernel_size"]),
         "n_freq_downsample": tune.grid_search(nhits_params["n_freq_downsample"]),
         "n_blocks": tune.grid_search(nhits_params["n_blocks"]),
-        "mlp_units": tune.grid_search(nhits_params["mlp_units"]),
+        "mlp_layers": tune.grid_search(nhits_params["mlp_layers"]),
+        "mlp_width": tune.grid_search(nhits_params["mlp_width"]),
     }
+
+    def dncreator(trial):
+        return f"t-{trial.trial_id[:-3]}"
+
     tuner = tune.Tuner(
         trainer,
         param_space={"train_loop_config": search_space},
         tune_config=tune.TuneConfig(
-            metric="valid_loss", mode="min", num_samples=1, scheduler=scheduler
+            metric="valid_loss",
+            mode="min",
+            num_samples=1,
+            scheduler=scheduler,
+            trial_dirname_creator=dncreator,
         ),
     )
     return tuner.fit()
@@ -145,9 +162,9 @@ def main():
             os.cpu_count() - 1,
         )
 
-    def get_ncm(nhits_params, lr_scheduler_params):
+    def get_ncm(name, nhits_params, lr_scheduler_params, batch_size, strategy, devices):
         return NeuralChaosModule(
-            args.outfn,
+            name,
             cfgyml.H,
             cfgyml.input_size,
             step_size,
@@ -157,15 +174,24 @@ def main():
             cfgyml.val_check_steps,
             lr_scheduler_params,
             cfgyml.random_seed,
+            batch_size,
+            strategy,
+            devices,
         )
 
     if args.tune:
         datafile = os.path.abspath(cfgyml.datafile)
         results = tune_hps(
-            args.save_path, args.outfn, get_ncm, get_datamodule, cfgyml, datafile
+            args.save_path,
+            args.outfn,
+            get_ncm,
+            get_datamodule,
+            cfgyml,
+            datafile,
         )
         print("best hps found:")
-        for k, v in results.get_best_result().config["train_loop_config"].items():
+        config = results.get_best_result().config["train_loop_config"]
+        for k, v in config.items():
             print(f"\t{k}:\t{v}")
 
         if args.save:
@@ -175,12 +201,20 @@ def main():
             model_path = f"{args.save_path}/models"
             os.makedirs(model_path, exist_ok=True)
             shutil.copyfile(cp, f"{model_path}/{args.outfn}.ckpt")
-            breakpoint()
             ncm = NeuralChaosModule.load_from_checkpoint(cp)
     else:
-        ncm = get_ncm(cfgyml.nhits_params, cfgyml.lr_scheduler_params)
+        strategy = "ddp" if args.ngpu > 1 else "auto"
+        ncm = get_ncm(
+            args.outfn,
+            cfgyml.nhits_params,
+            cfgyml.lr_scheduler_params,
+            cfgyml.batch_size,
+            strategy,
+            args.ngpu,
+        )
         dm = get_datamodule(cfgyml.batch_size, cfgyml.datafile)
-        ncm.fit(dm)
+        ncm.fit(dm, f"{args.save_path}/models", args.outfn)
+        config = cfgyml
 
     if args.save:
         y_hat, y_true = ncm.predict(dm)
@@ -189,7 +223,7 @@ def main():
         np.save(
             f"{datadir}/{args.outfn}.npy",
             {
-                "config": cfgyml,
+                "config": config,
                 "y_true": y_true.numpy(),
                 "y_hat": y_hat.numpy(),
             },

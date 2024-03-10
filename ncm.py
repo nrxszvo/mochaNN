@@ -21,11 +21,16 @@ class NeuralChaosModule(L.LightningModule):
         val_check_steps,
         lr_scheduler_params,
         random_seed,
+        batch_size,
+        strategy,
+        devices,
     ):
         super().__init__()
-        self.model = NHITS(h * step_size, input_size * step_size, **model_params)
-        self.save_hyperparameters()
         L.seed_everything(random_seed, workers=True)
+        self.save_hyperparameters(
+            model_params | lr_scheduler_params | {"batch_size": batch_size}
+        )
+        self.model = NHITS(h * step_size, input_size * step_size, **model_params)
         self.step_size = step_size
         self.h = h
         self.input_size = input_size
@@ -36,13 +41,14 @@ class NeuralChaosModule(L.LightningModule):
         self.val_check_steps = val_check_steps
         self.lr_scheduler_params = lr_scheduler_params
         self.max_steps = max_steps
-        self.name = name
-        logger = TensorBoardLogger(".", version=name)
+        logger = TensorBoardLogger(".", name="L", version=name)
         self.trainer_kwargs = {
             "logger": logger,
             "max_steps": max_steps,
             "val_check_interval": min(val_check_steps, max_steps),
             "check_val_every_n_epoch": None,
+            "strategy": strategy,
+            "devices": devices,
         }
 
     def configure_optimizers(self):
@@ -53,11 +59,13 @@ class NeuralChaosModule(L.LightningModule):
             gamma = self.lr_scheduler_params["gamma"]
             threshold = self.lr_scheduler_params["threshold"]
             patience = self.lr_scheduler_params["patience"]
+            min_lr = self.lr_scheduler_params["min_lr"]
             scheduler = ReduceLROnPlateau(
                 optimizer=optimizer,
                 factor=gamma,
                 threshold=threshold,
                 patience=patience,
+                min_lr=min_lr,
             )
             freq = self.val_check_steps
         elif name == "StepLR":
@@ -85,9 +93,9 @@ class NeuralChaosModule(L.LightningModule):
     def training_step(self, batch, batch_idx):
         pred = self([batch["input"]])
         loss = self.loss(pred, batch["target"])
-        self.log("train_loss", loss, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         cur_lr = self.trainer.optimizers[0].param_groups[0]["lr"]
-        self.log("lr", cur_lr, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.log("lr", cur_lr, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -97,24 +105,25 @@ class NeuralChaosModule(L.LightningModule):
         if torch.isnan(valid_loss):
             raise Exception("Loss is NaN, training stopped.")
 
-        self.log("valid_loss", valid_loss, prog_bar=True, on_epoch=True, sync_dist=True)
-        return {"valid_loss": valid_loss}
+        self.log("valid_loss", valid_loss, prog_bar=True, sync_dist=True)
+        return valid_loss
 
     def predict_step(self, batch, batch_idx):
         return self([batch["input"]])
 
-    def fit(self, datamodule):
+    def fit(self, datamodule, outdir, cpname):
         callbacks = [
             TQDMProgressBar(),
-            ModelCheckpoint(
-                dirpath="models", filename=self.name, save_weights_only=True
-            ),
+            ModelCheckpoint(dirpath=outdir, filename=cpname, save_weights_only=True),
         ]
         trainer = L.Trainer(callbacks=callbacks, **self.trainer_kwargs)
         trainer.fit(self, datamodule=datamodule)
 
     def predict(self, datamodule):
-        trainer = L.Trainer(callbacks=[TQDMProgressBar()], devices=1, **self.trainer_kwargs)
+        tkargs = self.trainer_kwargs
+        tkargs["strategy"] = "auto"
+        tkargs["devices"] = 1
+        trainer = L.Trainer(callbacks=[TQDMProgressBar()], **tkargs)
         pred = trainer.predict(self, datamodule)
         yt_raw = torch.from_numpy(datamodule.testset.series)
 

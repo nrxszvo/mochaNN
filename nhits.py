@@ -42,7 +42,8 @@ class NHITSBlock(nn.Module):
         input_size: int,
         h: int,
         n_theta: int,
-        mlp_units: list,
+        mlp_layers: int,
+        mlp_width: int,
         basis: nn.Module,
         n_pool_kernel_size: int,
         pooling_mode: str,
@@ -65,17 +66,17 @@ class NHITSBlock(nn.Module):
         )
 
         # Block MLPs
-        hidden_layers = [
-            nn.Linear(in_features=input_size, out_features=mlp_units[0][0])
-        ]
-        for layer in mlp_units:
-            hidden_layers.append(nn.Linear(in_features=layer[0], out_features=layer[1]))
+        hidden_layers = [nn.Linear(in_features=input_size, out_features=mlp_width)]
+        for _ in range(mlp_layers):
+            hidden_layers.append(
+                nn.Linear(in_features=mlp_width, out_features=mlp_width)
+            )
             hidden_layers.append(activ)
 
             if self.dropout_prob > 0:
                 hidden_layers.append(nn.Dropout(p=self.dropout_prob))
 
-        output_layer = [nn.Linear(in_features=mlp_units[-1][1], out_features=n_theta)]
+        output_layer = [nn.Linear(in_features=mlp_width, out_features=n_theta)]
         layers = hidden_layers + output_layer
         self.layers = nn.Sequential(*layers)
         self.basis = basis
@@ -116,12 +117,14 @@ class NHITS(nn.Module):
         input_size,
         n_stacks: int = 3,
         n_blocks: list = [1, 1, 1],
-        mlp_units: list = 3 * [[512, 512]],
+        mlp_layers: int = 3,
+        mlp_width: int = 512,
         n_pool_kernel_size: list = [2, 2, 1],
         n_freq_downsample: list = [4, 2, 1],
         pooling_mode: str = "MaxPool1d",
         dropout_prob_theta=0.0,
         activation="ReLU",
+        layer_norm=False,
     ):
         super().__init__()
 
@@ -130,12 +133,14 @@ class NHITS(nn.Module):
             input_size=input_size,
             n_stacks=n_stacks,
             n_blocks=n_blocks,
-            mlp_units=mlp_units,
+            mlp_layers=mlp_layers,
+            mlp_width=mlp_width,
             n_pool_kernel_size=n_pool_kernel_size,
             n_freq_downsample=n_freq_downsample,
             pooling_mode=pooling_mode,
             dropout_prob_theta=dropout_prob_theta,
             activation=activation,
+            layer_norm=layer_norm,
         )
         self.blocks = torch.nn.ModuleList(blocks)
 
@@ -145,19 +150,20 @@ class NHITS(nn.Module):
         input_size,
         n_stacks,
         n_blocks,
-        mlp_units,
+        mlp_layers,
+        mlp_width,
         n_pool_kernel_size,
         n_freq_downsample,
         pooling_mode,
         dropout_prob_theta,
         activation,
+        layer_norm,
     ):
         assert (
-            len(n_blocks)
-            == len(mlp_units)
+            n_stacks
+            == len(n_blocks)
             == len(n_pool_kernel_size)
             == len(n_freq_downsample)
-            == n_stacks
         )
         self.h = h
         block_list = []
@@ -174,7 +180,8 @@ class NHITS(nn.Module):
                     h=h,
                     input_size=input_size,
                     n_theta=n_theta,
-                    mlp_units=mlp_units,
+                    mlp_layers=mlp_layers,
+                    mlp_width=mlp_width,
                     n_pool_kernel_size=n_pool_kernel_size[i],
                     pooling_mode=pooling_mode,
                     basis=basis,
@@ -182,8 +189,13 @@ class NHITS(nn.Module):
                     activation=activation,
                 )
 
+                if layer_norm:
+                    norm = nn.LayerNorm(input_size)
+                else:
+                    norm = nn.Identity()
+
                 # Select type of evaluation and apply it to all layers of block
-                block_list.append(block)
+                block_list.append((block, norm))
 
         return block_list
 
@@ -192,11 +204,11 @@ class NHITS(nn.Module):
         residuals = insample_y.flip(dims=(-1,))  # backcast init
 
         forecast = insample_y[:, -1:, None]  # Level with Naive1
-        for i, block in enumerate(self.blocks):
+        for i, block, norm in enumerate(self.blocks):
             backcast, block_forecast = block(
                 insample_y=residuals,
             )
-            residuals = residuals - backcast
+            residuals = norm(residuals - backcast)
             forecast = forecast + block_forecast
 
         return forecast.squeeze()

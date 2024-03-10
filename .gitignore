@@ -1,8 +1,7 @@
 __pycache__/
-lightning_logs/
 datasets/
-models/
-predictions/
 *.ckpt
 *.swp
+lightning_logs/
+outputs/
 
