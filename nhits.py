@@ -128,7 +128,7 @@ class NHITS(nn.Module):
     ):
         super().__init__()
 
-        blocks = self.create_stack(
+        blocks, norms = self.create_stack(
             h=h,
             input_size=input_size,
             n_stacks=n_stacks,
@@ -143,6 +143,7 @@ class NHITS(nn.Module):
             layer_norm=layer_norm,
         )
         self.blocks = torch.nn.ModuleList(blocks)
+        self.norms = torch.nn.ModuleList(norms)
 
     def create_stack(
         self,
@@ -167,6 +168,7 @@ class NHITS(nn.Module):
         )
         self.h = h
         block_list = []
+        norms = []
         for i in range(n_stacks):
             for block_id in range(n_blocks[i]):
                 n_theta = input_size + max(h // n_freq_downsample[i], 1)
@@ -195,16 +197,17 @@ class NHITS(nn.Module):
                     norm = nn.Identity()
 
                 # Select type of evaluation and apply it to all layers of block
-                block_list.append((block, norm))
+                block_list.append(block)
+                norms.append(norm)
 
-        return block_list
+        return block_list, norms
 
     def forward(self, insample_y):
         # insample
         residuals = insample_y.flip(dims=(-1,))  # backcast init
 
         forecast = insample_y[:, -1:, None]  # Level with Naive1
-        for i, block, norm in enumerate(self.blocks):
+        for block, norm in zip(self.blocks, self.norms):
             backcast, block_forecast = block(
                 insample_y=residuals,
             )
