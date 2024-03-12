@@ -97,7 +97,6 @@ class NHITSBlock(nn.Module):
         return backcast, forecast
 
 
-# %% ../../nbs/models.nhits.ipynb 10
 class NHITS(nn.Module):
     """NHITS
 
@@ -196,14 +195,12 @@ class NHITS(nn.Module):
                 else:
                     norm = nn.Identity()
 
-                # Select type of evaluation and apply it to all layers of block
                 block_list.append(block)
                 norms.append(norm)
 
         return block_list, norms
 
     def forward(self, insample_y):
-        # insample
         residuals = insample_y.flip(dims=(-1,))  # backcast init
 
         forecast = insample_y[:, -1:, None]  # Level with Naive1
