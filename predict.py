@@ -8,8 +8,9 @@ from config import get_config
 from ncmdataset import NCMDataModule
 from ncm import NeuralChaosModule
 
+
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--cfg', required=True, help='yaml config file')
+parser.add_argument("--cfg", required=True, help="yaml config file")
 parser.add_argument("--cp", required=True, help="checkpoint file")
 parser.add_argument(
     "--outfn",
@@ -49,8 +50,17 @@ def main():
         batch_size,
         os.cpu_count() - 1,
     )
+    step_size = np.load(cfgyml.datafile, allow_pickle=True).item()["ndim"]
+    ncm = NeuralChaosModule.load_from_checkpoint(
+        args.cp,
+        name="predictor",
+        h=cfgyml.H,
+        input_size=cfgyml.input_size,
+        step_size=step_size,
+        model_params=cfgyml.nhits_params,
+        lr_scheduler_params=cfgyml.lr_scheduler_params,
+    )
 
-    ncm = NeuralChaosModule.load_from_checkpoint(args.cp)
     y_hat, y_true = ncm.predict(datamodule)
 
     np.save(

@@ -16,14 +16,14 @@ class NeuralChaosModule(L.LightningModule):
         input_size,
         step_size,
         model_params,
-        loss,
-        max_steps,
-        val_check_steps,
-        lr_scheduler_params,
-        random_seed,
-        batch_size,
-        strategy,
-        devices,
+        lr_scheduler_params=None,
+        loss="MAE",
+        max_steps=100,
+        val_check_steps=100,
+        random_seed=0,
+        batch_size=32,
+        strategy="auto",
+        devices=1,
     ):
         super().__init__()
         L.seed_everything(random_seed, workers=True)
