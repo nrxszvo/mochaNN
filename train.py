@@ -160,6 +160,8 @@ def main():
             cfgyml.H,
             batch_size,
             os.cpu_count() - 1,
+            cfgyml.dataset_edges,
+            cfgyml.dataset_edge_cdf,
         )
 
     def get_ncm(name, nhits_params, lr_scheduler_params, batch_size, strategy, devices):
@@ -169,10 +171,10 @@ def main():
             cfgyml.input_size,
             step_size,
             nhits_params,
+            lr_scheduler_params,
             cfgyml.loss,
             cfgyml.max_steps,
             cfgyml.val_check_steps,
-            lr_scheduler_params,
             cfgyml.random_seed,
             batch_size,
             strategy,

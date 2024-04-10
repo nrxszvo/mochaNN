@@ -252,6 +252,34 @@ def plot_summary_menu(available):
 critical_points = np.array([[0, 0, 0], [8.49, 8.49, 27], [-8.49, -8.49, 27]])
 
 
+def points_histo(d, name, start, end):
+    yt = d["data"]
+    fig, ax = plt.subplots()
+    nseries, npts, ndim = yt.shape
+    dfo = np.linalg.norm(yt[start:end], axis=2).reshape(-1)
+    ax.hist(dfo, bins=200, alpha=0.6)
+    axt = ax.twinx()
+    vs, edges, patches = axt.hist(
+        dfo,
+        bins=200,
+        cumulative=True,
+        histtype="step",
+        density=True,
+        color="red",
+        label="cdf",
+    )
+    patches[0].set_xy(patches[0].get_xy()[:-1])
+
+    ax.set_xticks([0, 1, 2, 3, 5, 10, 20, 30, 40, 50])
+    ax.set_xlabel("distance from origin")
+    ax.set_ylabel("# points")
+    ax.set_yscale("log")
+    axt.set_yscale("log")
+    axt.set_ylabel("cumulative distribution")
+    # fig.legend(bbox_to_anchor=(1, 1))
+    ax.set_title("Dataset points distribution")
+
+
 def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
     yt = d["data"]
     fig = plt.figure()
@@ -565,6 +593,33 @@ def plot_trajectories_menu(available):
             break
 
 
+def plot_dataset_histo_menu(available):
+    for i, (name, _) in enumerate(available):
+        print(f"{i}: {name}")
+    while True:
+        inp = input("enter index: ")
+        try:
+            c = int(inp)
+            fn = available[c][0]
+            name = available[c][1]
+            d = load(fn)
+            nseries = d["data"].shape[0]
+            try:
+                start = int(input(f"start index [0, {nseries-1}]: "))
+            except Exception:
+                start = 0
+            try:
+                end = int(input(f"end index [{start+1},{nseries}]: "))
+            except Exception:
+                end = nseries
+            points_histo(d, name, start, end)
+            plt.savefig(f"{name}_points.png", dpi=500)
+            plt.close()
+        except Exception as e:
+            print(e)
+            break
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -582,7 +637,7 @@ if __name__ == "__main__":
     available = collect_available(args.pattern, args.dirname)
 
     while True:
-        opt = input("enter dist|summary|3d|info|trajectories: ")
+        opt = input("enter dist|summary|3d|info|trajectories|points: ")
 
         if opt == "dist":
             choices_menu(available, plot_dist)
@@ -594,5 +649,7 @@ if __name__ == "__main__":
             choices_menu(available, print_metadata)
         elif opt == "trajectories":
             plot_trajectories_menu(available)
+        elif opt == "points":
+            plot_dataset_histo_menu(available)
         else:
             break

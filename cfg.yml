@@ -1,6 +1,8 @@
 random_seed: 42
 dtype: 'float32'
 datafile: 'datasets/Lorenz_10Kx10K.npy'
+dataset_edges: [3,60]
+dataset_edge_cdf: [0.2,1]
 ntrain: 9700
 nval: 100 
 ntest: 200
