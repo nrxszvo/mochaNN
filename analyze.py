@@ -253,7 +253,7 @@ critical_points = np.array([[0, 0, 0], [8.49, 8.49, 27], [-8.49, -8.49, 27]])
 
 
 def points_histo(d, name, start, end):
-    yt = d["data"]
+    yt = d["data"] if "data" in d else d["solutions"]
     fig, ax = plt.subplots()
     nseries, npts, ndim = yt.shape
     dfo = np.linalg.norm(yt[start:end], axis=2).reshape(-1)
@@ -281,7 +281,7 @@ def points_histo(d, name, start, end):
 
 
 def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
-    yt = d["data"]
+    yt = d["data"] if "data" in d else d["solutions"]
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
     cps = ax.scatter(*critical_points.T, label="critical points", color="purple")
@@ -577,7 +577,8 @@ def plot_trajectories_menu(available):
             fn = available[c][0]
             name = available[c][1]
             d = load(fn)
-            nseries, winsize, ndim = d["data"].shape
+            k = "data" if "data" in d else "solutions"
+            nseries, winsize, ndim = d[k].shape
             first = int(input(f"first series [0, {nseries-1}]: "))
             last = int(input(f"last series [{first}, {nseries-1}]: "))
             pstart = int(input(f"starting point [0, {winsize-1}]: "))
@@ -603,7 +604,8 @@ def plot_dataset_histo_menu(available):
             fn = available[c][0]
             name = available[c][1]
             d = load(fn)
-            nseries = d["data"].shape[0]
+            k = "data" if "data" in d else "solutions"
+            nseries = d[k].shape[0]
             try:
                 start = int(input(f"start index [0, {nseries-1}]: "))
             except Exception:
