@@ -12,6 +12,7 @@ class NeuralChaosModule(L.LightningModule):
     def __init__(
         self,
         name,
+        outdir,
         h,
         input_size,
         step_size,
@@ -30,10 +31,11 @@ class NeuralChaosModule(L.LightningModule):
         self.save_hyperparameters(
             model_params | lr_scheduler_params | {"batch_size": batch_size}
         )
-        self.model = NHITS(h * step_size, input_size * step_size, **model_params)
         self.step_size = step_size
         self.h = h
         self.input_size = input_size
+        self.model_params = model_params
+        self.model = None
         if loss == "MAE":
             self.loss = nn.L1Loss()
         else:
@@ -51,9 +53,22 @@ class NeuralChaosModule(L.LightningModule):
             "devices": devices,
         }
 
+        if self.model is not None:
+            return
+        self.model = NHITS(
+            self.h * self.step_size,
+            self.input_size * self.step_size,
+            **self.model_params,
+        )
+        callbacks = [
+            TQDMProgressBar(),
+            ModelCheckpoint(dirpath=outdir, filename=name, save_weights_only=True),
+        ]
+        self.trainer = L.Trainer(callbacks=callbacks, **self.trainer_kwargs)
+
     def configure_optimizers(self):
         lr = self.lr_scheduler_params["lr"]
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(self.trainer.model.parameters(), lr=lr)
         name = self.lr_scheduler_params["name"]
         if name == "ReduceLROnPlateau":
             gamma = self.lr_scheduler_params["gamma"]
@@ -111,13 +126,9 @@ class NeuralChaosModule(L.LightningModule):
     def predict_step(self, batch, batch_idx):
         return self([batch["input"]])
 
-    def fit(self, datamodule, outdir, cpname):
-        callbacks = [
-            TQDMProgressBar(),
-            ModelCheckpoint(dirpath=outdir, filename=cpname, save_weights_only=True),
-        ]
-        trainer = L.Trainer(callbacks=callbacks, **self.trainer_kwargs)
-        trainer.fit(self, datamodule=datamodule)
+    def fit(self, datamodule):
+        self.trainer.fit(self, datamodule=datamodule)
+        print(torch.cuda.memory_summary())
 
     def predict(self, datamodule):
         tkargs = self.trainer_kwargs

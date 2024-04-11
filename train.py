@@ -164,9 +164,12 @@ def main():
             cfgyml.dataset_edge_cdf,
         )
 
-    def get_ncm(name, nhits_params, lr_scheduler_params, batch_size, strategy, devices):
+    def get_ncm(
+        name, outdir, nhits_params, lr_scheduler_params, batch_size, strategy, devices
+    ):
         return NeuralChaosModule(
             name,
+            outdir,
             cfgyml.H,
             cfgyml.input_size,
             step_size,
@@ -205,17 +208,17 @@ def main():
             shutil.copyfile(cp, f"{model_path}/{args.outfn}.ckpt")
             ncm = NeuralChaosModule.load_from_checkpoint(cp)
     else:
-        strategy = "ddp" if args.ngpu > 1 else "auto"
         ncm = get_ncm(
             args.outfn,
+            f"{args.save_path}/models",
             cfgyml.nhits_params,
             cfgyml.lr_scheduler_params,
             cfgyml.batch_size,
-            strategy,
+            cfgyml.strategy,
             args.ngpu,
         )
         dm = get_datamodule(cfgyml.batch_size, cfgyml.datafile)
-        ncm.fit(dm, f"{args.save_path}/models", args.outfn)
+        ncm.fit(dm)
         config = cfgyml
 
     if args.save:

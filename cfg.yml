@@ -1,15 +1,16 @@
 random_seed: 42
+strategy: 'auto'
 dtype: 'float32'
 datafile: 'datasets/Lorenz_10Kx10K.npy'
-dataset_edges: [3,60]
-dataset_edge_cdf: [0.2,1]
+dataset_edges: null 
+dataset_edge_cdf: null 
 ntrain: 9700
 nval: 100 
 ntest: 200
 npts: 10000
 H: 100
 input_size: 500
-batch_size: 512
+batch_size: 512 
 max_steps: 350000
 val_check_steps: 5000
 lr_scheduler_params:
