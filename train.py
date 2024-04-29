@@ -160,8 +160,6 @@ def main():
             cfgyml.H,
             batch_size,
             os.cpu_count() - 1,
-            cfgyml.dataset_edges,
-            cfgyml.dataset_edge_cdf,
         )
 
     def get_ncm(
@@ -231,6 +229,7 @@ def main():
                 "config": config,
                 "y_true": y_true.numpy(),
                 "y_hat": y_hat.numpy(),
+                "dt": dm.dt,
             },
             allow_pickle=True,
         )
