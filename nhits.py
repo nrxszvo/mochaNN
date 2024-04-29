@@ -210,5 +210,4 @@ class NHITS(nn.Module):
             )
             residuals = norm(residuals - backcast)
             forecast = forecast + block_forecast
-
-        return forecast.squeeze()
+        return forecast.squeeze(2)
