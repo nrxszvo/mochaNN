@@ -1,6 +1,8 @@
-# **Mo**deling **Cha**os with **N**eural **N**etworks
+# MOdeling CHAos with Neural Networks
 
-A set of scripts for modeling chaotic systems using neural networks, built with Pytorch/Lightning.
+A set of scripts for modeling chaotic dynamical systems using neural networks, built with Pytorch/Lightning.
+
+See [environment.yml](https://github.com/nrxszvo/mochaNN/blob/main/environment.yml) for dependencies.
 
 Currently only the NHiTS neural architecture is supported. The NHiTS model code is adopted from [Nixtla's neuralforecast repo](https://github.com/Nixtla/neuralforecast), with some minor modifications.
 
