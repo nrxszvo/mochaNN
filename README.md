@@ -8,5 +8,5 @@ Currently only the [NHiTS](https://arxiv.org/abs/2201.12886) neural architecture
 
 A submodule-friendly fork of the [dysts](https://github.com/williamgilpin/dysts) repo is used for generating datasets of choatic systems.
 
-See [Modeling Chaotic Dyanmics with Deep Learning](https://nrxszvo.github.io/nhits-lorenz) for an example of a research project that used this repo.
+See [Modeling Chaotic Dynamics with Deep Learning](https://nrxszvo.github.io/nhits-lorenz) for an example of a research project that used this repo.
  
