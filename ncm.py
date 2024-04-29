@@ -44,14 +44,24 @@ class NeuralChaosModule(L.LightningModule):
         self.lr_scheduler_params = lr_scheduler_params
         self.max_steps = max_steps
         logger = TensorBoardLogger(".", name="L", version=name)
+        val_check_interval = min(val_check_steps, max_steps)
         self.trainer_kwargs = {
             "logger": logger,
             "max_steps": max_steps,
-            "val_check_interval": min(val_check_steps, max_steps),
+            "val_check_interval": val_check_interval,
             "check_val_every_n_epoch": None,
             "strategy": strategy,
             "devices": devices,
         }
+        self.callbacks = [
+            TQDMProgressBar(),
+            ModelCheckpoint(
+                dirpath=outdir,
+                filename=name,
+                save_weights_only=True,
+                every_n_train_steps=val_check_interval,
+            ),
+        ]
 
         if self.model is not None:
             return
@@ -60,11 +70,15 @@ class NeuralChaosModule(L.LightningModule):
             self.input_size * self.step_size,
             **self.model_params,
         )
-        callbacks = [
-            TQDMProgressBar(),
-            ModelCheckpoint(dirpath=outdir, filename=name, save_weights_only=True),
-        ]
-        self.trainer = L.Trainer(callbacks=callbacks, **self.trainer_kwargs)
+        print(f"# model params: {self.num_params():.2e}")
+        self.trainer = L.Trainer(callbacks=self.callbacks, **self.trainer_kwargs)
+
+    def num_params(self):
+        nparams = 0
+        for w in self.model.parameters():
+            if w.requires_grad:
+                nparams += w.numel()
+        return nparams
 
     def configure_optimizers(self):
         lr = self.lr_scheduler_params["lr"]
@@ -149,3 +163,12 @@ class NeuralChaosModule(L.LightningModule):
         y_hat = y_hat.reshape(nseries, nwin, self.h, ndim)
 
         return y_hat, y_true
+
+    def on_save_checkpoint(self, checkpoint):
+        """
+        Tentative fix for FSDP checkpointing issue
+        """
+        if not checkpoint.get("state_dict", None):
+            state_dict = self.trainer.model.state_dict()
+            checkpoint["state_dict"] = state_dict
+        return super().on_save_checkpoint(checkpoint)
