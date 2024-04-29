@@ -54,6 +54,7 @@ def main():
     ncm = NeuralChaosModule.load_from_checkpoint(
         args.cp,
         name="predictor",
+        outdir="outputs/models",
         h=cfgyml.H,
         input_size=cfgyml.input_size,
         step_size=step_size,
