@@ -46,9 +46,11 @@ def get_min_dist_errors(yt, smape):
     es = []
     for s in range(nseries):
         s_ds = []
+        # collect local minima
         for i in range(npts - 2):
             if dfo[s, i] - dfo[s, i + 1] > 0 and dfo[s, i + 1] - dfo[s, i + 2] < 0:
                 s_ds.append((i + 1, dfo[s, i + 1]))
+        # find max error among windows that include each local minima
         for idx in range(len(s_ds)):
             i, dist = s_ds[idx]
             wstart = max(0, i - winsize + 1)
@@ -63,14 +65,14 @@ def get_min_dist_errors(yt, smape):
     return ds, es
 
 
-def _plot_errors_by_window(d, name, fig, ax, smape_win=None):
+def plot_average_window_error_per_series(d, name, fig, ax):
     yt, yh = get_ys(d)
     nseries, nwin, winsize, ndim = yt.shape
     xax = np.arange(nwin)
 
-    if smape_win is None:
-        smape_win = calc_smape(yt, yh, ax=(2, 3))
+    smape_win = calc_smape(yt, yh, ax=(2, 3))
 
+    # unfold reference
     yt_flat = yt[:, ::winsize].reshape(nseries, -1, ndim)
     dist_from_origin = np.linalg.norm(yt_flat, axis=2)
 
@@ -90,9 +92,14 @@ def _plot_errors_by_window(d, name, fig, ax, smape_win=None):
         markersize=ms,
     )[0]
 
-    dfo_plt = ax.twinx().plot(
-        dist_from_origin[state["series"]], color="red", alpha=0.1
+    axt = ax.twinx()
+    dfo_plt = axt.plot(
+        dist_from_origin[state["series"]],
+        color="red",
+        alpha=0.1,
+        label="distance from origin",
     )[0]
+    axt.grid()
 
     state["smape_win"] = smape_win
     state["smape_plt"] = smape_plt
@@ -115,6 +122,7 @@ def _plot_errors_by_window(d, name, fig, ax, smape_win=None):
         bbox=dict(boxstyle="round", fc="w"),
     )
 
+    # double click opens 3d plot of corresponding window
     def onclick(fig, ax, nwin, annot, d, name, state, e):
         if e.inaxes is ax:
             if e.dblclick:
@@ -131,6 +139,7 @@ def _plot_errors_by_window(d, name, fig, ax, smape_win=None):
                 annot.set_visible(False)
                 fig.canvas.draw_idle()
 
+    # arrows to navigate through series
     def onkeypress(fig, ax, state, e):
         if e.key in ["left", "right"]:
             series = state["series"]
@@ -165,12 +174,13 @@ def plot_dist(ds):
     if len(ds) == 1:
         axesWErr = [axesWErr]
 
-    # axes are: series, window, widx, dim
     for i, ((d, name), axWErr) in enumerate(zip(ds, axesWErr)):
-        smape_win = _plot_errors_by_window(d, name, figWErr, axWErr)
+        # per series window errors
+        smape_win = plot_average_window_error_per_series(d, name, figWErr, axWErr)
         if name == ds[-1][1]:
             axWErr.set_xlabel("window #")
 
+        # 3d plot of window errors, series index X window index X smape error
         axHist3d = plt.figure().add_subplot(projection="3d")
         xs, ys = np.meshgrid(
             np.arange(smape_win.shape[0]), np.arange(smape_win.shape[1]), indexing="ij"
@@ -186,12 +196,15 @@ def plot_dist(ds):
 
         yt, yh = get_ys(d)
 
+        # average error per horizon index
         err_hidx = calc_smape(yt, yh, ax=(0, 1, 3))
         axHIdx.scatter(np.arange(len(err_hidx)), err_hidx, s=0.5, label=name)
 
+        # maximum errors for windows that include distance-from-origin local minima
         dfos, errs = get_min_dist_errors(yt, smape_win)
         axDFOIdx.scatter(dfos, errs, s=5, label=name)
 
+        # histogram of average window errors
         axHist.hist(
             smape_win.reshape(-1), bins=100, density=True, alpha=0.6, label=name
         )
@@ -204,6 +217,7 @@ def plot_dist(ds):
             label=f"{name} CDF",
         )
         patches[0].set_xy(patches[0].get_xy()[:-1])
+
     axHIdx.set_xlabel("horizon index")
     axHIdx.set_ylabel("sMAPE")
     axHIdx.legend()
@@ -215,12 +229,63 @@ def plot_dist(ds):
     axDFOIdx.set_title("Minimum distance from origin vs. maximum sMAPE")
 
     axHist.set_xlabel("sMAPE")
-    axHist.set_ylabel("# windows")
+    axHist.set_ylabel("density")
     axHist.set_yscale("log")
     axHistT.set_ylabel("cumulative likelihood")
     figHist.legend(bbox_to_anchor=(0.88, 0.82))
 
-    axHist.set_title(ds[-1][1] + " -- error distribution")
+    plt.show()
+    plt.close()
+
+
+def plot_hist_prog_menu(available):
+    fnsets = []
+    names = []
+
+    while True:
+        fns = []
+        name = input(f"enter name of group {len(fnsets)}: ")
+        if name == "":
+            break
+        names.append(name)
+        while True:
+            for i, (fn, name) in enumerate(available):
+                print(f"{i}: {name}")
+            idx = input(f"enter index for next member of {names[-1]}: ")
+            if idx == "":
+                break
+            fns.append(available[int(idx)][0])
+        fnsets.append(fns)
+    plot_hist_progressive(fnsets, names)
+
+
+def plot_hist_progressive(fns, names):
+    figHist, axHist = plt.subplots()
+    axHistT = axHist.twinx()
+    for fnset, name in zip(fns, names):
+        smapes = []
+        for fn in fnset:
+            yt, yh = get_ys(load(fn))
+            smape = calc_smape(yt, yh, ax=(2, 3))
+            smapes.append(smape)
+            del yt
+            del yh
+        smape = np.concatenate(smapes)
+        axHist.hist(smape.reshape(-1), bins=100, density=True, alpha=0.6, label=name)
+        vs, edges, patches = axHistT.hist(
+            smape.reshape(-1),
+            bins=100,
+            cumulative=True,
+            histtype="step",
+            density=True,
+            label=f"{name} CDF",
+        )
+        patches[0].set_xy(patches[0].get_xy()[:-1])
+    axHist.set_xlabel("sMAPE")
+    axHist.set_ylabel("density")
+    axHist.set_yscale("log")
+    axHistT.set_ylabel("cumulative likelihood")
+    figHist.legend(bbox_to_anchor=(0.88, 0.82))
     plt.show()
     plt.close()
 
@@ -252,38 +317,15 @@ def plot_summary_menu(available):
 critical_points = np.array([[0, 0, 0], [8.49, 8.49, 27], [-8.49, -8.49, 27]])
 
 
-def points_histo(d, name, start, end):
-    yt = d["data"] if "data" in d else d["solutions"]
-    fig, ax = plt.subplots()
-    nseries, npts, ndim = yt.shape
-    dfo = np.linalg.norm(yt[start:end], axis=2).reshape(-1)
-    ax.hist(dfo, bins=200, alpha=0.6)
-    axt = ax.twinx()
-    vs, edges, patches = axt.hist(
-        dfo,
-        bins=200,
-        cumulative=True,
-        histtype="step",
-        density=True,
-        color="red",
-        label="cdf",
-    )
-    patches[0].set_xy(patches[0].get_xy()[:-1])
-
-    ax.set_xticks([0, 1, 2, 3, 5, 10, 20, 30, 40, 50])
-    ax.set_xlabel("distance from origin")
-    ax.set_ylabel("# points")
-    ax.set_yscale("log")
-    axt.set_yscale("log")
-    axt.set_ylabel("cumulative distribution")
-    # fig.legend(bbox_to_anchor=(1, 1))
-    ax.set_title("Dataset points distribution")
-
-
 def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
     yt = d["data"] if "data" in d else d["solutions"]
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
+
+    ax.set_xlim3d(left=-20, right=20)
+    ax.set_ylim3d(bottom=-20, top=20)
+    ax.set_zlim3d(bottom=0, top=50)
+
     cps = ax.scatter(*critical_points.T, label="critical points", color="purple")
     axObjs = []
     for i in range(sidx, eidx + 1):
@@ -338,10 +380,12 @@ def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
                     ax,
                     state,
                 ),
-                frames=90,
-                interval=100,
+                frames=FRAMES,
+                interval=INTERVAL,
             )
-            ani.save("trajectories.gif", dpi=50, writer=animation.PillowWriter(fps=10))
+            ani.save(
+                "trajectories.gif", dpi=DPI, writer=animation.PillowWriter(fps=FPS)
+            )
         elif e.key == "p":
             vis = state["cps"].get_visible()
             state["cps"].set_visible(not vis)
@@ -374,39 +418,44 @@ def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
     )
 
 
+def concat_y(y, widx, ncat):
+    inc = y.shape[1]
+    start = widx - (inc * (ncat - 1))
+    end = widx + inc
+    return np.concatenate([y[wi] for wi in np.arange(start, end, inc)])
+
+
 def plot_3d(d, name, sidx, widx):
     yt, yh = get_ys(d)
-    ytw = yt[sidx, widx]
-    yhw = yh[sidx, widx]
-
+    ytw = concat_y(yt[sidx], widx, NCAT)
+    yhw = concat_y(yh[sidx], widx, NCAT)
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
     ax.scatter(*critical_points.T, label="critical points", color="purple")
     smape = calc_smape(ytw, yhw, ax=(0, 1))
-    yt3d = ax.plot(*ytw.T, label="reference")[0]
-    yh3d = ax.plot(*yhw.T, label="prediction", alpha=0.6)[0]
+    if ytw.shape[0] == 1:
+        yt3d = ax.scatter(*ytw.T, label="reference")
+        yh3d = ax.scatter(*yhw.T, label="prediction", alpha=0.6)
+    else:
+        yt3d = ax.plot(*ytw.T, label="reference")[0]
+        yh3d = ax.plot(*yhw.T, label="prediction", alpha=0.6)[0]
     ax.legend(loc="upper right", bbox_to_anchor=(1, 1), bbox_transform=fig.transFigure)
 
+    ax.set_xlim3d(left=-20, right=20)
+    ax.set_ylim3d(bottom=-20, top=20)
+    ax.set_zlim3d(bottom=0, top=50)
     ax.set_title(f"Window {widx} - sMAPE Error: {smape:.2f}", loc="left")
-    # ax.set_title(f"Series {sidx}, Window {widx}, sMAPE Error: {smape:.2f}", loc="left")
-
-    def concat_yt(yt, widx, nwinyt):
-        inc = yt.shape[1] - 1
-        start = widx - (inc * (nwinyt - 1))
-        end = widx + inc
-        return np.concatenate([yt[wi] for wi in np.arange(start, end, inc)])
 
     def update(yt, yh, ax, state, frame):
-        widx = state["widx"] + frame
+        widx = state["widx"] + state["inc"] * frame
         sidx = state["sidx"]
 
-        ytw = yt[sidx, widx]
-        yhw = yh[sidx, widx]
-        smape = calc_smape(ytw, yhw, ax=(0, 1))
+        ytw = concat_y(yt[sidx], widx, state["ncat"])
+        yhw = concat_y(yh[sidx], widx, state["ncat"])
+
+        smape = calc_smape(yt[sidx, widx], yh[sidx, widx], ax=(0, 1))
         dfo = np.linalg.norm(ytw, axis=-1).min()
-        ax.set_title(
-            f"Window {widx} - sMAPE Error: {smape:.2f} - DFO {dfo:.1f}", loc="left"
-        )
+        ax.set_title(f"sMAPE Error: {smape:.2f} - DFO {dfo:.1f}", loc="left")
         state["yt3d"].set_data_3d(*ytw.T)
         state["yh3d"].set_data_3d(*yhw.T)
         return state["yt3d"], state["yh3d"]
@@ -414,33 +463,42 @@ def plot_3d(d, name, sidx, widx):
     def onkeypress(yt, yh, fig, ax, state, e):
         sidx = state["sidx"]
         widx = state["widx"]
+        inc = state["inc"]
         nseries, nwin, winsize, ndim = yt.shape
 
         if e.key == "b":
             if widx >= winsize - 1:
                 state["nwinyt"] += 1
-                ytw = concat_yt(yt[sidx], widx, state["nwinyt"])
+                ytw = concat_y(yt[sidx], widx, state["nwinyt"])
                 state["yt3d"].set_data_3d(*ytw.T)
                 fig.canvas.draw_idle()
         elif e.key in ["left", "right"]:
             if e.key == "left":
-                if widx > 0:
-                    widx -= 1
+                if widx >= inc:
+                    widx -= inc
                 else:
                     sidx = (nseries + sidx - 1) % nseries
                     widx = nwin - 1
             elif e.key == "right":
-                if widx < nwin - 1:
-                    widx += 1
+                if widx < nwin - inc:
+                    widx += inc
                 else:
                     sidx = (sidx + 1) % nseries
                     widx = 0
 
-            ytw = concat_yt(yt[sidx], widx, state["nwinyt"])
-            state["yt3d"].set_data_3d(*ytw.T)
-            smape = calc_smape(yt[sidx, widx], yh[sidx, widx], ax=(0, 1))
-            state["yh3d"].set_data_3d(*yh[sidx, widx].T)
+            ytw = concat_y(yt[sidx], widx, state["ncat"])
+            yhw = concat_y(yh[sidx], widx, state["ncat"])
+            if ytw.shape[0] == 1:
+                state["yt3d"].remove()
+                state["yt3d"] = ax.scatter(*ytw.T, label="reference", color="blue")
+                state["yh3d"].remove()
+                state["yh3d"] = ax.scatter(*yhw.T, label="prediction", color="orange")
+            else:
+                state["yt3d"].set_data_3d(*ytw.T)
+                state["yh3d"].set_data_3d(*yhw.T)
+
             dfo = np.linalg.norm(ytw, axis=-1).min()
+            smape = calc_smape(ytw, yhw, ax=(0, 1))
             ax.set_title(
                 f"Window {widx} - sMAPE Error: {smape:.2f} - DFO {dfo:.3f}", loc="left"
             )
@@ -464,12 +522,14 @@ def plot_3d(d, name, sidx, widx):
                         "widx": widx,
                         "yt3d": state["yt3d"],
                         "yh3d": state["yh3d"],
+                        "inc": INC,
+                        "ncat": NCAT,
                     },
                 ),
-                frames=90,
-                interval=100,
+                frames=FRAMES,
+                interval=INTERVAL,
             )
-            ani.save("animate.gif", dpi=50, writer=animation.PillowWriter(fps=10))
+            ani.save("animate.gif", dpi=100, writer=animation.PillowWriter(fps=FPS))
 
     fig.canvas.mpl_connect(
         "key_press_event",
@@ -485,6 +545,8 @@ def plot_3d(d, name, sidx, widx):
                 "yt3d": yt3d,
                 "yh3d": yh3d,
                 "smape": smape,
+                "inc": INC,
+                "ncat": NCAT,
                 "nwinyt": 1,
             },
         ),
@@ -594,39 +656,12 @@ def plot_trajectories_menu(available):
             break
 
 
-def plot_dataset_histo_menu(available):
-    for i, (name, _) in enumerate(available):
-        print(f"{i}: {name}")
-    while True:
-        inp = input("enter index: ")
-        try:
-            c = int(inp)
-            fn = available[c][0]
-            name = available[c][1]
-            d = load(fn)
-            k = "data" if "data" in d else "solutions"
-            nseries = d[k].shape[0]
-            try:
-                start = int(input(f"start index [0, {nseries-1}]: "))
-            except Exception:
-                start = 0
-            try:
-                end = int(input(f"end index [{start+1},{nseries}]: "))
-            except Exception:
-                end = nseries
-            points_histo(d, name, start, end)
-            plt.savefig(f"{name}_points.png", dpi=500)
-            plt.close()
-        except Exception as e:
-            print(e)
-            break
-
-
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="A collection of functions for analyzing and visualizing trajectory data from npy files, either datasets or prediction files",
     )
     parser.add_argument(
         "--pattern", default="(.*).npy", help="re for matching npy files"
@@ -634,12 +669,38 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dirname", default="predictions", help="prediction data directory"
     )
+    parser.add_argument(
+        "--ncat",
+        default=1,
+        type=int,
+        help="number of windows to concatenate together for 3d plot",
+    )
+    parser.add_argument(
+        "--inc",
+        default=1,
+        type=int,
+        help="number of points per frame to increment by when animating trajectories",
+    )
+    parser.add_argument(
+        "--frames", default=500, help="number of frames to record", type=int
+    )
+    parser.add_argument(
+        "--interval", default=33, help="milliseconds between frames in gif", type=int
+    )
+    parser.add_argument("--fps", default=50, help="fps for gif", type=int)
+    parser.add_argument("--dpi", default=100, help="dpi for gif/imaage", type=int)
     args = parser.parse_args()
 
+    NCAT = args.ncat
+    INC = args.inc
+    FRAMES = args.frames
+    INTERVAL = args.interval
+    FPS = args.fps
+    DPI = args.dpi
     available = collect_available(args.pattern, args.dirname)
 
     while True:
-        opt = input("enter dist|summary|3d|info|trajectories|points: ")
+        opt = input("enter dist|summary|3d|info|trajectories|histprog: ")
 
         if opt == "dist":
             choices_menu(available, plot_dist)
@@ -651,7 +712,7 @@ if __name__ == "__main__":
             choices_menu(available, print_metadata)
         elif opt == "trajectories":
             plot_trajectories_menu(available)
-        elif opt == "points":
-            plot_dataset_histo_menu(available)
+        elif opt == "histprog":
+            plot_hist_prog_menu(available)
         else:
             break
