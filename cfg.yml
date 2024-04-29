@@ -1,9 +1,7 @@
 random_seed: 42
 strategy: 'auto'
 dtype: 'float32'
-datafile: 'datasets/Lorenz_10Kx10K.npy'
-dataset_edges: null 
-dataset_edge_cdf: null 
+datafile: 'datasets/Lorenz_10Kx10K_balanced.npy'
 ntrain: 9700
 nval: 100 
 ntest: 200
@@ -11,7 +9,7 @@ npts: 10000
 H: 100
 input_size: 500
 batch_size: 512 
-max_steps: 350000
+max_steps: 200000
 val_check_steps: 5000
 lr_scheduler_params:
   lr: 1.e-4
@@ -28,8 +26,5 @@ nhits_params:
   n_blocks: [8,8,8,8]
   mlp_layers: 4 
   mlp_width: 2048 
-  #n_pool_kernel_size: [10,4,2,2,1]
-  #n_freq_downsample: [60,25,6,2,1]
-  #n_blocks: [1,1,1,1,1]
   layer_norm: True
 
