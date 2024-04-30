@@ -684,9 +684,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--frames", default=500, help="number of frames to record", type=int
     )
-    parser.add_argument(
-        "--interval", default=33, help="milliseconds between frames in gif", type=int
-    )
     parser.add_argument("--fps", default=50, help="fps for gif", type=int)
     parser.add_argument("--dpi", default=100, help="dpi for gif/imaage", type=int)
     args = parser.parse_args()
@@ -694,8 +691,8 @@ if __name__ == "__main__":
     NCAT = args.ncat
     INC = args.inc
     FRAMES = args.frames
-    INTERVAL = args.interval
     FPS = args.fps
+    INTERVAL = 1000.0 / FPS
     DPI = args.dpi
     available = collect_available(args.pattern, args.dirname)
 
