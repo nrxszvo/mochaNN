@@ -31,11 +31,12 @@ def func(model_fn, seqlen, resample_points, ic):
     return sol
 
 
-def ic_from_trajectory(model_fn, n_ic, seqlen, perturb, ndim):
+def ic_from_trajectory(model_fn, traj, n_ic, seqlen, perturb, ndim):
     model = model_fn()
-    sol_ref = model.make_trajectory(n=seqlen)
-    ic_idx = np.random.choice(seqlen, n_ic, replace=False)
-    ics = sol_ref[ic_idx] * perturb
+    if traj is None:
+        traj = model.make_trajectory(n=seqlen)
+    ic_idx = np.random.choice(len(traj), n_ic)
+    ics = traj[ic_idx] * perturb
     return ics
 
 
@@ -55,6 +56,8 @@ def make_multi_ic(
     resample_points,
     ic_method,
     ic_point,
+    traj,
+    blocks,
 ):
     model_fn = getattr(flows, name)
     model = model_fn()
@@ -64,39 +67,48 @@ def make_multi_ic(
     pbf = perturb_factors(ic_perturb, n_ic, ndim)
 
     if ic_method == "trajectory":
-        ics = ic_from_trajectory(model_fn, n_ic, seqlen, pbf, ndim)
+        ics = ic_from_trajectory(model_fn, traj, n_ic, seqlen, pbf, ndim)
     elif ic_method == "point":
         if ic_point is None:
             ic_point = model.ic
         ics = ic_from_point(pbf, ic_point)
 
     n_proc = os.cpu_count()
-    pool = mp.Pool(n_proc)
-    solns = []
-    chunksize = 10
-    for sol in tqdm.tqdm(
-        pool.imap_unordered(
-            partial(func, model_fn, seqlen, resample_points), ics, chunksize=chunksize
-        ),
-        total=n_ic,
-    ):
-        solns.append(sol)
+    chunksize = 1
+    sol_per_block = n_ic // blocks
+    total = 0
+    cur_block = 0
+    while total < n_ic:
+        print(f"total: {total}")
+        pool = mp.Pool(n_proc)
+        solns = []
+        n_ic_block = min(n_ic - total, sol_per_block)
+        cur_ics = ics[cur_block * n_ic_block : (cur_block + 1) * n_ic_block]
+        for sol in tqdm.tqdm(
+            pool.imap_unordered(
+                partial(func, model_fn, seqlen, resample_points),
+                cur_ics,
+                chunksize=chunksize,
+            ),
+            total=n_ic_block,
+        ):
+            solns.append(sol)
 
-    pool.close()
+        total += len(solns)
+        pool.close()
+        solns = np.array(solns)
+        print_local_minima(solns)
 
-    solns = np.array(solns)
-    print_local_minima(solns)
+        dataset = {
+            "model": "Lorenz",
+            "ndim": ndim,
+            "dt": model_md["period"] / resample_points,
+            "dt_solver": model.dt,
+            "solutions": solns,
+        }
 
-    dataset = {
-        "model": name,
-        "ndim": ndim,
-        "dt": model_md["period"] / resample_points,
-        "dt_solver": model.dt,
-        "lyapunov": model_md["maximum_lyapunov_estimated"],
-        "period": model_md["period"],
-        "solutions": solns,
-    }
-    return dataset
+        np.save(f"blk-{cur_block}_{args.fn}", dataset, allow_pickle=True)
+        cur_block += 1
 
 
 if __name__ == "__main__":
@@ -141,10 +153,27 @@ if __name__ == "__main__":
         nargs="+",
         help="N-dimensional point to use with 'point' method for ic generation; if None, then the model's default ic will be used",
     )
+    parser.add_argument(
+        "--traj",
+        help="trajectories file for use with ic_method==trajectory",
+        default=None,
+    )
     parser.add_argument("--fn", default=None, help="output filename")
+    parser.add_argument(
+        "--blocks",
+        default=1,
+        type=int,
+        help="number of equal-sized npy files to divide the output among",
+    )
     args = parser.parse_args()
 
-    dataset = make_multi_ic(
+    traj = args.traj
+    if args.traj is not None:
+        traj = np.load(args.traj)
+        nseries, npts, ndim = traj.shape
+        traj = traj.reshape(-1, ndim)
+
+    make_multi_ic(
         args.model,
         args.num_ic,
         args.seqlen,
@@ -152,5 +181,6 @@ if __name__ == "__main__":
         args.resample_points,
         args.ic_method,
         args.ic_point,
+        traj,
+        args.blocks,
     )
-    np.save(args.fn, dataset, allow_pickle=True)
