@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
+plt.rcParams["keymap.fullscreen"].remove("f")
 plt.rcParams["keymap.back"].remove("left")
 plt.rcParams["keymap.forward"].remove("right")
 plt.rcParams["keymap.save"].remove("s")
@@ -37,32 +38,36 @@ def calc_smape(yt, yh, ax=(0, 1, 2, 3)):
     return smape
 
 
-def get_min_dist_errors(yt, smape):
-    nseries, nwin, winsize, ndim = yt.shape
-    yt_flat = yt[:, ::winsize].reshape(nseries, -1, ndim)
+def get_min_dist_errors(smape, stride, yt=None, yt_flat=None, winsize=None):
+    nseries, nwin = smape.shape
+    if yt_flat is None:
+        _, _, winsize, ndim = yt.shape
+        yt_flat = yt[:, :: winsize // stride].reshape(nseries, -1, ndim)
     dfo = np.linalg.norm(yt_flat, axis=2)
     npts = dfo.shape[1]
-    ds = []
-    es = []
+    minima = []
+    errs = []
     for s in range(nseries):
-        s_ds = []
+        s_minima = []
         # collect local minima
-        for i in range(npts - 2):
-            if dfo[s, i] - dfo[s, i + 1] > 0 and dfo[s, i + 1] - dfo[s, i + 2] < 0:
-                s_ds.append((i + 1, dfo[s, i + 1]))
+        for i in range(1, npts - 1):
+            if dfo[s, i - 1] > dfo[s, i] and dfo[s, i + 1] > dfo[s, i]:
+                s_minima.append((i, dfo[s, i]))
         # find max error among windows that include each local minima
-        for idx in range(len(s_ds)):
-            i, dist = s_ds[idx]
-            wstart = max(0, i - winsize + 1)
+        for i, dist in s_minima:
+            wstart = max(0, (i - winsize) // stride + 1)
+            wend = min(i // stride + 1, nwin)
             max_e = 0
-            for j in range(wstart, min(i + 1, nwin)):
-                if smape[s, j] > max_e and dist <= dfo[s, j : j + winsize].min():
+            for j in range(wstart, wend):
+                if (
+                    smape[s, j] > max_e
+                    and dist <= dfo[s, j * stride : j * stride + winsize].min()
+                ):
                     max_e = smape[s, j]
 
-            ds.append(dist)
-            es.append(max_e)
-
-    return ds, es
+            minima.append(dist)
+            errs.append(max_e)
+    return minima, errs
 
 
 def plot_average_window_error_per_series(d, name, fig, ax):
@@ -72,9 +77,7 @@ def plot_average_window_error_per_series(d, name, fig, ax):
 
     smape_win = calc_smape(yt, yh, ax=(2, 3))
 
-    # unfold reference
-    yt_flat = yt[:, ::winsize].reshape(nseries, -1, ndim)
-    dist_from_origin = np.linalg.norm(yt_flat, axis=2)
+    dfo = np.linalg.norm(yt, axis=3).min(axis=2)
 
     state = {"series": 0, "nseries": nseries, "name": name}
 
@@ -94,9 +97,9 @@ def plot_average_window_error_per_series(d, name, fig, ax):
 
     axt = ax.twinx()
     dfo_plt = axt.plot(
-        dist_from_origin[state["series"]],
+        dfo[state["series"]],
         color="red",
-        alpha=0.1,
+        alpha=0.6,
         label="distance from origin",
     )[0]
     axt.grid()
@@ -104,7 +107,7 @@ def plot_average_window_error_per_series(d, name, fig, ax):
     state["smape_win"] = smape_win
     state["smape_plt"] = smape_plt
     state["smape_lim"] = (0.9 * smape_win.min(), 1.1 * smape_win.max())
-    state["dfo"] = dist_from_origin
+    state["dfo"] = dfo
     state["dfo_plt"] = dfo_plt
     ax.set_ylim(*state["smape_lim"])
     ax.set_ylabel("error")
@@ -195,14 +198,15 @@ def plot_dist(ds):
         axHist3d.get_figure().tight_layout()
 
         yt, yh = get_ys(d)
+        stride = d["stride"] if "stride" in d else 1
 
         # average error per horizon index
         err_hidx = calc_smape(yt, yh, ax=(0, 1, 3))
         axHIdx.scatter(np.arange(len(err_hidx)), err_hidx, s=0.5, label=name)
 
         # maximum errors for windows that include distance-from-origin local minima
-        dfos, errs = get_min_dist_errors(yt, smape_win)
-        axDFOIdx.scatter(dfos, errs, s=5, label=name)
+        dfos, errs = get_min_dist_errors(smape_win, stride, yt=yt)
+        axDFOIdx.scatter(dfos, errs, s=5, label=name, alpha=0.6)
 
         # histogram of average window errors
         axHist.hist(
@@ -262,12 +266,18 @@ def plot_hist_prog_menu(available):
 def plot_hist_progressive(fns, names):
     figHist, axHist = plt.subplots()
     axHistT = axHist.twinx()
+    axDFOIdx = plt.figure().add_subplot()
     for fnset, name in zip(fns, names):
         smapes = []
+        yt_flat = []
         for fn in fnset:
-            yt, yh = get_ys(load(fn))
+            d = load(fn)
+            yt, yh = get_ys(d)
+            stride = d["stride"] if "stride" in d else 1
             smape = calc_smape(yt, yh, ax=(2, 3))
             smapes.append(smape)
+            nseries, nwin, winsize, ndim = yt.shape
+            yt_flat.append(yt[:, :: winsize // stride].reshape(nseries, -1, ndim))
             del yt
             del yh
         smape = np.concatenate(smapes)
@@ -281,10 +291,23 @@ def plot_hist_progressive(fns, names):
             label=f"{name} CDF",
         )
         patches[0].set_xy(patches[0].get_xy()[:-1])
+
+        # maximum errors for windows that include distance-from-origin local minima
+        dfos, errs = get_min_dist_errors(
+            smape, stride, yt_flat=np.concatenate(yt_flat), winsize=winsize
+        )
+        axDFOIdx.scatter(dfos, errs, s=5, label=name, alpha=0.6)
+
     axHist.set_xlabel("sMAPE")
     axHist.set_ylabel("density")
     axHist.set_yscale("log")
     axHistT.set_ylabel("cumulative likelihood")
+
+    axDFOIdx.set_xlabel("distance from origin")
+    axDFOIdx.set_ylabel("sMAPE")
+    axDFOIdx.legend()
+    axDFOIdx.set_title("Minimum distance from origin vs. maximum sMAPE")
+
     figHist.legend(bbox_to_anchor=(0.88, 0.82))
     plt.show()
     plt.close()
@@ -418,17 +441,41 @@ def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
     )
 
 
-def concat_y(y, widx, ncat):
-    inc = y.shape[1]
-    start = widx - (inc * (ncat - 1))
-    end = widx + inc
-    return np.concatenate([y[wi] for wi in np.arange(start, end, inc)])
+def concat_y(y, widx, ncat, stride):
+    idx_per_win = y.shape[1] * stride
+    start = widx
+    end = widx + ncat * idx_per_win
+    return np.concatenate([y[wi] for wi in np.arange(start, end, idx_per_win)])
+
+
+def concat_rev(y, widx, ncat, stride):
+    nwin, winsize, ndim = y.shape
+    idx_per_win = winsize // stride
+
+    if widx < idx_per_win:
+        return y[0, : stride * widx]
+
+    segment = np.empty((0, ndim))
+
+    start = widx - (idx_per_win * ncat)
+    if start < 0:
+        segment = y[0, : stride * (widx % idx_per_win)]
+        start = widx % idx_per_win
+
+    segment = np.concatenate(
+        [segment] + [y[wi] for wi in np.arange(start, widx, idx_per_win)],
+    )
+
+    return segment
 
 
 def plot_3d(d, name, sidx, widx):
     yt, yh = get_ys(d)
-    ytw = concat_y(yt[sidx], widx, NCAT)
-    yhw = concat_y(yh[sidx], widx, NCAT)
+
+    stride = d["stride"] if "stride" in d else 1
+
+    ytw = concat_y(yt[sidx], widx, NCAT, stride)
+    yhw = concat_y(yh[sidx], widx, NCAT, stride)
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
     ax.scatter(*critical_points.T, label="critical points", color="purple")
@@ -447,47 +494,62 @@ def plot_3d(d, name, sidx, widx):
     ax.set_title(f"Window {widx} - sMAPE Error: {smape:.2f}", loc="left")
 
     def update(yt, yh, ax, state, frame):
-        widx = state["widx"] + state["inc"] * frame
+        widx = state["widx"] + INC * frame
         sidx = state["sidx"]
 
-        ytw = concat_y(yt[sidx], widx, state["ncat"])
-        yhw = concat_y(yh[sidx], widx, state["ncat"])
+        ytw = concat_y(yt[sidx], widx, NCAT, stride)
+        yhw = concat_y(yh[sidx], widx, NCAT, stride)
 
         smape = calc_smape(yt[sidx, widx], yh[sidx, widx], ax=(0, 1))
         dfo = np.linalg.norm(ytw, axis=-1).min()
         ax.set_title(f"sMAPE Error: {smape:.2f} - DFO {dfo:.1f}", loc="left")
         state["yt3d"].set_data_3d(*ytw.T)
         state["yh3d"].set_data_3d(*yhw.T)
-        return state["yt3d"], state["yh3d"]
+        ret = (state["yt3d"], state["yh3d"])
+        if "yinput3d" in state:
+            ywin = concat_rev(yt[sidx], widx, state["nwininput"], stride)
+            state["yinput3d"].set_data_3d(*ywin.T)
+            ret = (state["yt3d"], state["yh3d"], state["yinput3d"])
+        return ret
 
     def onkeypress(yt, yh, fig, ax, state, e):
         sidx = state["sidx"]
         widx = state["widx"]
         inc = state["inc"]
         nseries, nwin, winsize, ndim = yt.shape
-
-        if e.key == "b":
-            if widx >= winsize - 1:
-                state["nwinyt"] += 1
-                ytw = concat_y(yt[sidx], widx, state["nwinyt"])
-                state["yt3d"].set_data_3d(*ytw.T)
-                fig.canvas.draw_idle()
-        elif e.key in ["left", "right"]:
-            if e.key == "left":
+        if e.key in ["b", "f"]:
+            if e.key == "b":
+                state["nwininput"] += 1
+            elif state["nwininput"] > 0:
+                state["nwininput"] -= 1
+            if state["nwininput"] > 0:
+                ywin = concat_rev(yt[sidx], widx, state["nwininput"], stride)
+                if "yinput3d" in state:
+                    state["yinput3d"].set_data_3d(*ywin.T)
+                else:
+                    state["yinput3d"] = ax.plot(*ywin.T, label="input", alpha=0.6)[0]
+            elif "yinput3d" in state:
+                state["yinput3d"].remove()
+                del state["yinput3d"]
+            fig.canvas.draw_idle()
+        elif any([k in e.key for k in ["left", "right"]]):
+            if "shift" in e.key:
+                inc *= 10
+            if "left" in e.key:
                 if widx >= inc:
                     widx -= inc
                 else:
                     sidx = (nseries + sidx - 1) % nseries
                     widx = nwin - 1
-            elif e.key == "right":
+            elif "right" in e.key:
                 if widx < nwin - inc:
                     widx += inc
                 else:
                     sidx = (sidx + 1) % nseries
                     widx = 0
 
-            ytw = concat_y(yt[sidx], widx, state["ncat"])
-            yhw = concat_y(yh[sidx], widx, state["ncat"])
+            ytw = concat_y(yt[sidx], widx, state["ncat"], stride)
+            yhw = concat_y(yh[sidx], widx, state["ncat"], stride)
             if ytw.shape[0] == 1:
                 state["yt3d"].remove()
                 state["yt3d"] = ax.scatter(*ytw.T, label="reference", color="blue")
@@ -496,9 +558,13 @@ def plot_3d(d, name, sidx, widx):
             else:
                 state["yt3d"].set_data_3d(*ytw.T)
                 state["yh3d"].set_data_3d(*yhw.T)
+                if "yinput3d" in state:
+                    ywin = concat_rev(yt[sidx], widx, state["nwininput"], stride)
+                    state["yinput3d"].set_data_3d(*ywin.T)
 
             dfo = np.linalg.norm(ytw, axis=-1).min()
-            smape = calc_smape(ytw, yhw, ax=(0, 1))
+            npts = yhw.shape[0]
+            smape = calc_smape(ytw[-npts:], yhw, ax=(0, 1))
             ax.set_title(
                 f"Window {widx} - sMAPE Error: {smape:.2f} - DFO {dfo:.3f}", loc="left"
             )
@@ -517,16 +583,9 @@ def plot_3d(d, name, sidx, widx):
                     yt,
                     yh,
                     ax,
-                    {
-                        "sidx": sidx,
-                        "widx": widx,
-                        "yt3d": state["yt3d"],
-                        "yh3d": state["yh3d"],
-                        "inc": INC,
-                        "ncat": NCAT,
-                    },
+                    state,
                 ),
-                frames=FRAMES,
+                frames=min(FRAMES, nwin - widx),
                 interval=INTERVAL,
             )
             ani.save("animate.gif", dpi=100, writer=animation.PillowWriter(fps=FPS))
@@ -547,7 +606,7 @@ def plot_3d(d, name, sidx, widx):
                 "smape": smape,
                 "inc": INC,
                 "ncat": NCAT,
-                "nwinyt": 1,
+                "nwininput": 0,
             },
         ),
     )
@@ -563,24 +622,30 @@ def print_hparams(d):
 
 def collect_available(pattern, dirname):
     available = []
-    for fn in sorted(os.listdir(dirname)):
-        m = re.match(pattern, fn)
-        if m is not None:
-            available.append((f"{dirname}/{fn}", m.group(1)))
+    for curdir, dns, fns in os.walk(dirname):
+        for fn in sorted(fns):
+            m = re.match(pattern, fn)
+            if m is not None:
+                parent = os.path.basename(curdir)
+                if parent == dirname:
+                    name = m.group(1)
+                else:
+                    name = f"{parent}/{m.group(1)}"
+                available.append((f"{curdir}/{fn}", name))
     return available
 
 
-def choices_menu(available, fn):
-    for i, (name, _) in enumerate(available):
+def choices_menu(available, func):
+    for i, (fn, name) in enumerate(available):
         print(f"{i}: {name}")
     choices = []
     while True:
         inp = input("idx to add (a for all): ")
         if inp == "a":
-            fn([(load(fn), name) for fn, name in available])
+            func([(load(fn), name) for fn, name in available])
         elif inp == "":
             if len(choices) > 0:
-                fn([(load(fn), name) for fn, name in choices])
+                func([(load(fn), name) for fn, name in choices])
                 choices = []
             else:
                 break
