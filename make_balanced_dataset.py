@@ -11,8 +11,10 @@ if __name__ == "__main__":
         distribution of series based on their minimum L2 points.  Series are organized 
         such that all train series appear first, followed by validation series, followed by test series""",
     )
-    parser.add_argument("in_npy", help="input dataset npy file")
-    parser.add_argument("out_npy", help="output npy filename")
+    parser.add_argument(
+        "--in_npy", help="input dataset npy file", nargs="+", required=True
+    )
+    parser.add_argument("--out_npy", help="output npy filename", required=True)
     parser.add_argument(
         "--n", type=int, default=10000, help="number of series to select"
     )
@@ -24,11 +26,18 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    d = np.load(args.in_npy, allow_pickle=True).item()
-    solns = d["solutions"]
-    dfo = np.linalg.norm(solns, axis=2)
-    _, npts = dfo.shape
-    srs_sorted = np.argsort(dfo.min(axis=1))[: args.n]
+    solns = None
+    for in_npy in args.in_npy:
+        print(in_npy)
+        d = np.load(in_npy, allow_pickle=True).item()
+        solns = (
+            d["solutions"] if solns is None else np.concatenate([solns, d["solutions"]])
+        )
+        dfo = np.linalg.norm(solns, axis=2)
+        _, npts = dfo.shape
+        srs_sorted = np.argsort(dfo.min(axis=1))[: args.n]
+        solns = solns[srs_sorted]
+        del dfo
 
     val_ivl = args.n // args.n_val
     test_ivl = args.n // args.n_test
@@ -36,13 +45,12 @@ if __name__ == "__main__":
     test_srs = []
     val_srs = []
     for i in range(args.n):
-        s = srs_sorted[i]
         if i % test_ivl == 0:
-            test_srs.append(s)
+            test_srs.append(i)
         elif (i - 1) % val_ivl == 0:
-            val_srs.append(s)
+            val_srs.append(i)
         else:
-            train_srs.append(s)
+            train_srs.append(i)
 
     series = np.concatenate([solns[train_srs], solns[val_srs], solns[test_srs]])
     d["solutions"] = series
