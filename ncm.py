@@ -16,6 +16,7 @@ class NeuralChaosModule(L.LightningModule):
         h,
         input_size,
         step_size,
+        stride,
         model_params,
         lr_scheduler_params=None,
         loss="MAE",
@@ -32,6 +33,7 @@ class NeuralChaosModule(L.LightningModule):
             model_params | lr_scheduler_params | {"batch_size": batch_size}
         )
         self.step_size = step_size
+        self.stride = stride
         self.h = h
         self.input_size = input_size
         self.model_params = model_params
@@ -153,14 +155,13 @@ class NeuralChaosModule(L.LightningModule):
         yt_raw = torch.from_numpy(datamodule.testset.series)
 
         nseries, npts, ndim = yt_raw.shape
-        nwin = npts - (self.h + self.input_size) + 1
-
         yt_raw = yt_raw[:, self.input_size :, :]
         unfold = torch.nn.Unfold((self.h, 1))
         y_true = unfold(yt_raw.permute(0, 2, 1).unsqueeze(-1)).permute(0, 2, 1)
-        y_true = y_true.reshape(nseries, nwin, ndim, self.h).permute(0, 1, 3, 2)
+        y_true = y_true.reshape(nseries, -1, ndim, self.h).permute(0, 1, 3, 2)
+        y_true = y_true[:, :: self.stride]
         y_hat = torch.cat(pred, dim=0)
-        y_hat = y_hat.reshape(nseries, nwin, self.h, ndim)
+        y_hat = y_hat.reshape(nseries, -1, self.h, ndim)
 
         return y_hat, y_true
 

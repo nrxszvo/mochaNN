@@ -4,23 +4,24 @@ import lightning as L
 
 
 class NCMDataset(Dataset):
-    def __init__(self, series, input_size, h):
+    def __init__(self, series, input_size, h, stride=1):
         super().__init__()
         self.h = h
         self.input_size = input_size
         self.window_size = input_size + h
+        self.stride = stride
         self.series = series
         nseries, npts, ndim = self.series.shape
         self.nseries = nseries
         self.npts = npts
-        self.win_per_series = self.npts - self.window_size + 1
+        self.win_per_series = (self.npts - self.window_size) // self.stride + 1
 
     def __len__(self):
         return self.nseries * self.win_per_series
 
     def __getitem__(self, idx):
         s_idx = idx // self.win_per_series
-        w_idx = idx - (s_idx * self.win_per_series)
+        w_idx = self.stride * (idx - (s_idx * self.win_per_series))
 
         window = self.series[s_idx, w_idx : w_idx + self.window_size]
         return {
@@ -40,6 +41,7 @@ class NCMDataModule(L.LightningDataModule):
         npts,
         input_size,
         h,
+        stride,
         batch_size,
         num_workers,
     ):
@@ -52,6 +54,7 @@ class NCMDataModule(L.LightningDataModule):
         self.npts = npts
         self.input_size = input_size
         self.h = h
+        self.stride = stride
         self.batch_size = batch_size
         self.num_workers = num_workers
         data = np.load(self.datafile, allow_pickle=True).item()
@@ -64,11 +67,13 @@ class NCMDataModule(L.LightningDataModule):
                 self.series[: self.ntrain, : self.npts],
                 self.input_size,
                 self.h,
+                self.stride,
             )
             self.valset = NCMDataset(
                 self.series[self.ntrain : self.ntrain + self.nval, : self.npts],
                 self.input_size,
                 self.h,
+                self.stride,
             )
 
         if stage in ["test", "predict"]:
@@ -79,6 +84,7 @@ class NCMDataModule(L.LightningDataModule):
                 ],
                 self.input_size,
                 self.h,
+                self.stride,
             )
 
     def train_dataloader(self):
