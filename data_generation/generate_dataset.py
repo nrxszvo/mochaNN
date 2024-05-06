@@ -6,18 +6,15 @@ from collections import defaultdict
 from functools import partial
 import tqdm
 import time
+from utils import get_local_minima
 
 
 def print_local_minima(solns, bins=[5, 4, 3, 2, 1]):
-    dfo = np.linalg.norm(solns, axis=2)
+    minima, _ = get_local_minima(solns)
     hist = defaultdict(lambda: 0)
-    for s in range(dfo.shape[0]):
-        raw_d = np.convolve(dfo[s], [1, -1], mode="valid")
-        indicators = np.convolve(np.sign(raw_d), [-1, 1], mode="valid")
-        minima = dfo[s, np.argwhere(indicators < 0) + 1]
-        for bd in bins:
-            n = (minima < bd).sum()
-            hist[bd] += n
+    for bd in bins:
+        n = (minima < bd).sum()
+        hist[bd] += n
 
     print("number of local minima with L2 less than:")
     for bd in bins:
@@ -136,7 +133,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Generate a set of solutions to the Lorenz Attractor for a given number of initial conditions.  Solutions are generated in parallel using multiprocessing.",
+        description="Generate a set of solutions to the Lorenz Attractor using scipy.integrate.solve_ivp for a given number of initial conditions.  Calls to solve_ivp are parallelized using multiprocessing.",
     )
     parser.add_argument("--seqlen", default=10000, help="sequence length", type=int)
     parser.add_argument(
