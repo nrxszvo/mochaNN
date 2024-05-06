@@ -1,6 +1,6 @@
 import numpy as np
 import argparse
-
+import os
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -12,7 +12,7 @@ if __name__ == "__main__":
         such that all train series appear first, followed by validation series, followed by test series""",
     )
     parser.add_argument(
-        "--in_npy", help="input dataset npy file", nargs="+", required=True
+        "--in_npy", help="input dataset npy file or directory of files", required=True
     )
     parser.add_argument("--out_npy", help="output npy filename", required=True)
     parser.add_argument(
@@ -27,7 +27,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     solns = None
-    for in_npy in args.in_npy:
+    if os.path.isdir(args.in_npy):
+        npys = [
+            f"{args.in_npy}/{fn}"
+            for fn in os.listdir(args.in_npy)
+            if fn.endswith("npy")
+        ]
+    else:
+        npys = [args.in_npy]
+
+    for in_npy in npys:
         print(in_npy)
         d = np.load(in_npy, allow_pickle=True).item()
         solns = (
