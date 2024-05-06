@@ -1,40 +1,63 @@
 import numpy as np
-import dysts.flows as flows
+from scipy.integrate import solve_ivp
 import multiprocessing as mp
 import os
 from collections import defaultdict
 from functools import partial
 import tqdm
+import time
 
 
-def print_local_minima(solns):
+def print_local_minima(solns, bins=[5, 4, 3, 2, 1]):
     dfo = np.linalg.norm(solns, axis=2)
     hist = defaultdict(lambda: 0)
     for s in range(dfo.shape[0]):
-        lm = []
-        for p in range(1, dfo.shape[1] - 1):
-            if dfo[s, p - 1] > dfo[s, p] and dfo[s, p + 1] > dfo[s, p]:
-                lm.append(dfo[s, p])
-        lm = np.array(lm)
-        for bd in [5, 4, 3, 2, 1]:
-            n = (lm < bd).sum()
+        raw_d = np.convolve(dfo[s], [1, -1], mode="valid")
+        indicators = np.convolve(np.sign(raw_d), [-1, 1], mode="valid")
+        minima = dfo[s, np.argwhere(indicators < 0) + 1]
+        for bd in bins:
+            n = (minima < bd).sum()
             hist[bd] += n
+
     print("number of local minima with L2 less than:")
-    for k in hist:
-        print(f"\t{k}: {hist[k]}")
+    for bd in bins:
+        print(f"\t{bd}: {hist[bd]}")
 
 
-def func(model_fn, seqlen, resample_points, ic):
-    model = model_fn()
-    model.ic = ic
-    sol = model.make_trajectory(n=seqlen, pts_per_period=resample_points)
-    return sol
+def Lorenz(t, X):
+    beta = 2.667
+    rho = 28
+    sigma = 10
+    x, y, z = X
+    xdot = sigma * y - sigma * x
+    ydot = rho * x - x * z - y
+    zdot = x * y - beta * z
+    return xdot, ydot, zdot
 
 
-def ic_from_trajectory(model_fn, traj, n_ic, seqlen, perturb, ndim):
-    model = model_fn()
-    if traj is None:
-        traj = model.make_trajectory(n=seqlen)
+NDIM = 3
+PERIOD = 1.5008
+DT = 0.0001801
+
+
+def func(N, rpoints, ic):
+    tlim = PERIOD * N / rpoints
+    t_eval = np.linspace(0, tlim - tlim / N, N)
+    R = solve_ivp(
+        Lorenz,
+        (t_eval[0], t_eval[-1]),
+        ic,
+        t_eval=t_eval,
+        first_step=DT,
+        method="Radau",
+        vectorized=True,
+    )
+    if R.status != 0:
+        raise Exception(f"solve_ivp error: {R.message}")
+    return R.y.T
+
+
+def ic_from_trajectory(traj, n_ic, seqlen, perturb, ndim):
     ic_idx = np.random.choice(len(traj), n_ic)
     ics = traj[ic_idx] * perturb
     return ics
@@ -58,19 +81,13 @@ def make_multi_ic(
     ic_point,
     traj,
     blocks,
+    fn_func,
 ):
-    model_fn = getattr(flows, name)
-    model = model_fn()
-    model_md = model._load_data()
-    ndim = model_md["embedding_dimension"]
-
-    pbf = perturb_factors(ic_perturb, n_ic, ndim)
+    pbf = perturb_factors(ic_perturb, n_ic, NDIM)
 
     if ic_method == "trajectory":
-        ics = ic_from_trajectory(model_fn, traj, n_ic, seqlen, pbf, ndim)
+        ics = ic_from_trajectory(traj, n_ic, seqlen, pbf, NDIM)
     elif ic_method == "point":
-        if ic_point is None:
-            ic_point = model.ic
         ics = ic_from_point(pbf, ic_point)
 
     n_proc = os.cpu_count()
@@ -78,37 +95,40 @@ def make_multi_ic(
     sol_per_block = n_ic // blocks
     total = 0
     cur_block = 0
-    while total < n_ic:
-        print(f"total: {total}")
-        pool = mp.Pool(n_proc)
-        solns = []
-        n_ic_block = min(n_ic - total, sol_per_block)
-        cur_ics = ics[cur_block * n_ic_block : (cur_block + 1) * n_ic_block]
-        for sol in tqdm.tqdm(
-            pool.imap_unordered(
-                partial(func, model_fn, seqlen, resample_points),
-                cur_ics,
-                chunksize=chunksize,
-            ),
-            total=n_ic_block,
-        ):
-            solns.append(sol)
+    tgt = partial(func, seqlen, resample_points)
+    with mp.Pool(processes=n_proc) as pool:
+        while total < n_ic:
+            print(f"{n_ic - total} remaining")
+            solns = []
+            n_ic_block = min(n_ic - total, sol_per_block)
+            cur_ics = ics[cur_block * n_ic_block : (cur_block + 1) * n_ic_block]
+            for sol in tqdm.tqdm(
+                pool.imap_unordered(
+                    tgt,
+                    cur_ics,
+                    chunksize=chunksize,
+                ),
+                total=n_ic_block,
+            ):
+                solns.append(sol)
 
-        total += len(solns)
-        pool.close()
-        solns = np.array(solns)
-        print_local_minima(solns)
+            total += len(solns)
 
-        dataset = {
-            "model": "Lorenz",
-            "ndim": ndim,
-            "dt": model_md["period"] / resample_points,
-            "dt_solver": model.dt,
-            "solutions": solns,
-        }
+            solns = np.array(solns)
+            dataset = {
+                "model": "Lorenz",
+                "ndim": NDIM,
+                "dt": PERIOD / resample_points,
+                "dt_solver": DT,
+                "solutions": solns,
+            }
+            np.save(fn_func(cur_block), dataset, allow_pickle=True)
+            cur_block += 1
 
-        np.save(f"blk-{cur_block}_{args.fn}", dataset, allow_pickle=True)
-        cur_block += 1
+            start = time.time()
+            print_local_minima(solns)
+            end = time.time()
+            print(f"time to compute local minima: {end-start:.1e} seconds")
 
 
 if __name__ == "__main__":
@@ -116,10 +136,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Use the 'dysts' module to generate a set of solutions for a given flow model and number of initial conditions.  Solutions are generated in parallel using multiprocessing.",
-    )
-    parser.add_argument(
-        "--model", default="Lorenz", help="model name", choices=["Lorenz"]
+        description="Generate a set of solutions to the Lorenz Attractor for a given number of initial conditions.  Solutions are generated in parallel using multiprocessing.",
     )
     parser.add_argument("--seqlen", default=10000, help="sequence length", type=int)
     parser.add_argument(
@@ -173,6 +190,13 @@ if __name__ == "__main__":
         nseries, npts, ndim = traj.shape
         traj = traj.reshape(-1, ndim)
 
+    if args.blocks > 1:
+        outdir = os.path.splitext(os.path.basename(args.fn))[0]
+        os.makedirs(outdir, exist_ok=True)
+        fn_func = lambda blk: f"{outdir}/blk-{blk}.npy"
+    else:
+        fn_func = lambda blk: args.fn
+
     make_multi_ic(
         args.model,
         args.num_ic,
@@ -183,4 +207,5 @@ if __name__ == "__main__":
         args.ic_point,
         traj,
         args.blocks,
+        fn_func,
     )
