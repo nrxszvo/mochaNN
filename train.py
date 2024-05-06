@@ -158,12 +158,19 @@ def main():
             cfgyml.npts,
             cfgyml.input_size,
             cfgyml.H,
+            cfgyml.stride,
             batch_size,
             os.cpu_count() - 1,
         )
 
     def get_ncm(
-        name, outdir, nhits_params, lr_scheduler_params, batch_size, strategy, devices
+        name,
+        outdir,
+        nhits_params,
+        lr_scheduler_params,
+        batch_size,
+        strategy,
+        devices,
     ):
         return NeuralChaosModule(
             name,
@@ -171,6 +178,7 @@ def main():
             cfgyml.H,
             cfgyml.input_size,
             step_size,
+            cfgyml.stride,
             nhits_params,
             lr_scheduler_params,
             cfgyml.loss,
