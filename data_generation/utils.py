@@ -1,20 +1,24 @@
 import numpy as np
 
 
-def get_local_minima(solutions):
-    """a local minimum is defined as a point whose L2 magnitude is less than that of both of its neighbors"""
-    dfo = np.linalg.norm(solutions, axis=2)
+def get_local_minima_from_solutions(solutions):
+    dfo = np.linalg.norm(solutions, axis=-1)
     minima = []
     mindex = []
     for s in range(dfo.shape[0]):
-        # first calculate direction change indicators for each pair of points
-        dci = np.convolve(dfo[s], [1, -1], mode="valid")
-        # a positive value followed by negative value indicates a local minimum
-        dci = np.sign(dci)
-        # distinguish (pos, neg) pairs from (neg, pos) pairs
-        indicators = np.convolve(dci, [-1, 1], mode="valid")
-        # now all negative values indicate local minima
-        idx = (np.argwhere(indicators < 0) + 1)[:, 0]
-        minima.extend(dfo[s, idx])
-        mindex.extend(idx)
-    return np.array(minima), np.array(mindex)
+        s_min, s_idx = get_local_minima(dfo[s])
+        minima.extend(s_min)
+        mindex.extend([[s, i] for i in s_idx])
+
+
+def get_local_minima(dfo):
+    """a local minimum is defined as a point whose L2 magnitude is less than that of both of its neighbors"""
+    # first calculate direction change indicators for each pair of points
+    dci = np.convolve(dfo, [1, -1], mode="valid")
+    # a positive value followed by negative value indicates a local minimum
+    dci = np.sign(dci)
+    # distinguish (pos, neg) pairs from (neg, pos) pairs
+    indicators = np.convolve(dci, [-1, 1], mode="valid")
+    # now all negative values indicate local minima
+    idx = (np.argwhere(indicators < 0) + 1)[:, 0]
+    return dfo[idx], idx

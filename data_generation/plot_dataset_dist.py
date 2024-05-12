@@ -1,20 +1,20 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from functools import cmp_to_key
-from utils import get_local_minima
+from utils import get_local_minima_from_solutions
 
 
 def hist_local_minima(solns, H, L, stride, bins):
     nseries, npts, ndim = solns.shape
     win_per_srs = (npts - L - H) // stride + 1
     hist = {b: 0 for b in bins[:-1]}
-    minima, mindex = get_local_minima(solns[:, L:])
+    minima, mindex = get_local_minima_from_solutions(solns[:, L:])
     count = 0
     for bidx in range(len(bins) - 1):
         upper = bins[bidx]
         lower = bins[bidx + 1]
         binmembers = (minima <= upper) & (minima > lower)
-        n = np.minimum(H, npts - mindex[binmembers] + L + 1).sum() // stride
+        n = np.minimum(H, npts - mindex[binmembers][1] + L + 1).sum() // stride
         hist[upper] += n
         count += n
     hist[float("inf")] = nseries * win_per_srs - count

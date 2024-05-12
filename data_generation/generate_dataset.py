@@ -6,11 +6,11 @@ from collections import defaultdict
 from functools import partial
 import tqdm
 import time
-from utils import get_local_minima
+from utils import get_local_minima_from_solutions
 
 
 def print_local_minima(solns, bins=[5, 4, 3, 2, 1]):
-    minima, _ = get_local_minima(solns)
+    minima, _ = get_local_minima_from_solutions(solns)
     hist = defaultdict(lambda: 0)
     for bd in bins:
         n = (minima < bd).sum()
