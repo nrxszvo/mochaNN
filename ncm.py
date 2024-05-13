@@ -155,7 +155,7 @@ class NeuralChaosModule(L.LightningModule):
         yt_raw = torch.from_numpy(datamodule.testset.series)
 
         nseries, npts, ndim = yt_raw.shape
-        # yt_raw = yt_raw[:, self.input_size :, :]
+        yt_raw = yt_raw[:, self.input_size :, :]
         # unfold = torch.nn.Unfold((self.h, 1))
         # y_true = unfold(yt_raw.permute(0, 2, 1).unsqueeze(-1)).permute(0, 2, 1)
         # y_true = y_true.reshape(nseries, -1, ndim, self.h).permute(0, 1, 3, 2)
