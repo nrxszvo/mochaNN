@@ -166,6 +166,14 @@ class NeuralChaosModule(L.LightningModule):
 
         return y_hat, y_true
 
+    def validate(self, datamodule):
+        tkargs = self.trainer_kwargs
+        tkargs["strategy"] = "auto"
+        tkargs["devices"] = 1
+        trainer = L.Trainer(callbacks=[TQDMProgressBar()], **tkargs)
+        res = trainer.validate(self, datamodule)
+        return res
+
     def on_save_checkpoint(self, checkpoint):
         """
         Tentative fix for FSDP checkpointing issue
