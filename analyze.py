@@ -2,6 +2,7 @@ from functools import partial
 import os
 import re
 import numpy as np
+from numpy.polynomial.polynomial import Polynomial
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from data_generation.utils import get_local_minima
@@ -111,7 +112,7 @@ def get_min_dist_errors(yt, yh, stride):
                 max_errs.append(max_e)
                 indices.append((s, max_i))
 
-    return final_minima, max_errs, indices, np.array(smapes)
+    return np.array(final_minima), np.array(max_errs), indices, np.array(smapes)
 
 
 def plot_dfo_vs_max_err(fig, ax, d, name):
@@ -121,7 +122,11 @@ def plot_dfo_vs_max_err(fig, ax, d, name):
     stride = d["stride"]
     nseries, nwin, winsize, ndim = yh.shape
     dfos, errs, indices, smapes = get_min_dist_errors(yt, yh, stride)
-    ax.scatter(dfos, errs, s=5, label=name, alpha=0.6)
+    ax.scatter(dfos, errs, s=5, label=name, alpha=0.4)
+
+    ffit = Polynomial.fit(dfos, errs, 10)
+    x = np.sort(dfos)
+    ax.plot(x, ffit(x), label="best-fit", alpha=0.6)
 
     # double click opens 3d plot of corresponding window
     def onclick(fig, ax, name, dfos, errs, indices, e):
@@ -860,7 +865,7 @@ if __name__ == "__main__":
     parser.add_argument("--dpi", default=100, help="dpi for gif/imaage", type=int)
     parser.add_argument(
         "--mode",
-        default="single",
+        default="map",
         choices=["map", "single"],
         help="read single file or set of maps",
     )
