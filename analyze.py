@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from data_generation.utils import get_local_minima
+import torch
+import tqdm
 
 plt.rcParams["keymap.fullscreen"].remove("f")
 plt.rcParams["keymap.back"].remove("left")
@@ -52,9 +54,15 @@ def get_ys(d):
     return yt, yh
 
 
-def yt_window(yt_flat, winsize, stride):
-    nwin = (yt_flat.shape[0] - winsize) // stride + 1
-    return np.array([yt_flat[i * stride : (i * stride + winsize)] for i in range(nwin)])
+def yt_window(yt_flat, winsize, stride, ax=0):
+    # nwin = (yt_flat.shape[0] - winsize) // stride + 1
+    # return np.array([yt_flat[i * stride : (i * stride + winsize)] for i in range(nwin)])
+    yt_tens = torch.from_numpy(yt_flat.copy())
+    yt_win = yt_tens.unfold(ax, winsize, stride)
+    dimidx = list(range(yt_win.ndim))
+    dimidx[-1] = dimidx[-2]
+    dimidx[-2] = len(dimidx) - 1
+    return yt_win.permute(*dimidx).numpy()
 
 
 def calc_mae(yt, yh, ax=(0, 1, 2, 3)):
@@ -76,9 +84,11 @@ def get_min_dist_errors(yt, yh, stride):
     indices = []
 
     nseries, nwin, winsize, _ = yh.shape
-    for s in range(nseries):
+    smapes = []
+    for s in tqdm.tqdm(range(nseries)):
         yt_win = yt_window(yt[s], winsize, stride)
         smape = calc_smape(yt_win, yh[s], ax=(1, 2))
+        smapes.append(smape)
         dfo = np.linalg.norm(yt[s], axis=-1)
         minima, mindex = get_local_minima(dfo)
 
@@ -100,7 +110,8 @@ def get_min_dist_errors(yt, yh, stride):
                 final_minima.append(dist)
                 max_errs.append(max_e)
                 indices.append((s, max_i))
-    return final_minima, max_errs, indices
+
+    return final_minima, max_errs, indices, np.array(smapes)
 
 
 def plot_dfo_vs_max_err(fig, ax, d, name):
@@ -109,7 +120,7 @@ def plot_dfo_vs_max_err(fig, ax, d, name):
     yh = d["y_hat"]
     stride = d["stride"]
     nseries, nwin, winsize, ndim = yh.shape
-    dfos, errs, indices = get_min_dist_errors(yt, yh, stride)
+    dfos, errs, indices, smapes = get_min_dist_errors(yt, yh, stride)
     ax.scatter(dfos, errs, s=5, label=name, alpha=0.6)
 
     # double click opens 3d plot of corresponding window
@@ -127,6 +138,8 @@ def plot_dfo_vs_max_err(fig, ax, d, name):
         "button_press_event",
         partial(onclick, fig, ax, name, dfos, errs, indices),
     )
+
+    return smapes
 
 
 def series_stats(yt, yh, winsize, stride, sidx):
@@ -243,7 +256,7 @@ def plot_average_window_error_per_series(d, name, fig, ax):
 def plot_dist(ds):
     figHist, axHist = plt.subplots()
     axHistT = axHist.twinx()
-    axHIdx = plt.figure().add_subplot()
+    # axHIdx = plt.figure().add_subplot()
     figDFO, axDFO = plt.subplots()
     figWErr, axesWErr = plt.subplots(len(ds), 1)
 
@@ -251,17 +264,22 @@ def plot_dist(ds):
         axesWErr = [axesWErr]
 
     for i, ((d, name), axWErr) in enumerate(zip(ds, axesWErr)):
+        print(f"analyzing {name}...")
+
+        # maximum errors for windows that include distance-from-origin local minima
+        smapes = plot_dfo_vs_max_err(figDFO, axDFO, d, name)
+
         # per series window errors
         plot_average_window_error_per_series(d, name, figWErr, axWErr)
         if name == ds[-1][1]:
             axWErr.set_xlabel("window #")
 
         # 3d plot of window errors, series index X window index X smape error
-        """axHist3d = plt.figure().add_subplot(projection="3d")
+        axHist3d = plt.figure().add_subplot(projection="3d")
         xs, ys = np.meshgrid(
-            np.arange(smape_win.shape[0]), np.arange(smape_win.shape[1]), indexing="ij"
+            np.arange(smapes.shape[0]), np.arange(smapes.shape[1]), indexing="ij"
         )
-        pts = np.stack([xs, ys, smape_win])
+        pts = np.stack([xs, ys, smapes])
         for sidx in range(pts.shape[1]):
             axHist3d.plot(*pts[:, sidx])
         axHist3d.set_xlabel("series index")
@@ -269,25 +287,17 @@ def plot_dist(ds):
         axHist3d.set_zlabel("sMAPE")
         axHist3d.set_title(f"{name} - error by series and window", y=1.0, pad=-14)
         axHist3d.get_figure().tight_layout()
-        """
-        yt, yh = get_ys(d)
-        stride = d["stride"] if "stride" in d else 1
 
         # average error per horizon index
         """
         err_hidx = calc_smape(yt, yh, ax=(0, 1, 3))
         axHIdx.scatter(np.arange(len(err_hidx)), err_hidx, s=0.5, label=name)
         """
-        # maximum errors for windows that include distance-from-origin local minima
-        plot_dfo_vs_max_err(figDFO, axDFO, d, name)
 
         # histogram of average window errors
-        """
-        axHist.hist(
-            smape_win.reshape(-1), bins=100, density=True, alpha=0.6, label=name
-        )
+        axHist.hist(smapes.reshape(-1), bins=100, density=True, alpha=0.6, label=name)
         vs, edges, patches = axHistT.hist(
-            smape_win.reshape(-1),
+            smapes.reshape(-1),
             bins=100,
             cumulative=True,
             histtype="step",
@@ -295,23 +305,23 @@ def plot_dist(ds):
             label=f"{name} CDF",
         )
         patches[0].set_xy(patches[0].get_xy()[:-1])
-        """
+
+    """
     axHIdx.set_xlabel("horizon index")
     axHIdx.set_ylabel("sMAPE")
     axHIdx.legend()
     axHIdx.set_title("Average error by horizon index")
+    """
 
     axDFO.set_xlabel("distance from origin")
     axDFO.set_ylabel("sMAPE")
     axDFO.legend()
     axDFO.set_title("Minimum distance from origin vs. maximum sMAPE")
-
     axHist.set_xlabel("sMAPE")
     axHist.set_ylabel("density")
     axHist.set_yscale("log")
     axHistT.set_ylabel("cumulative likelihood")
     figHist.legend(bbox_to_anchor=(0.88, 0.82))
-
     plt.show()
     plt.close()
 
@@ -578,7 +588,8 @@ def plot_3d(d, name, sidx, widx):
         widx = state["widx"] + INC * frame
         sidx = state["sidx"]
         winsize = yh.shape[2]
-        ytw = concat_y(yt_window(yt[sidx], winsize, stride), widx, NCAT, stride)
+        yt_fold = yt_window(yt[sidx], winsize, stride)
+        ytw = concat_y(yt_fold, widx, NCAT, stride)
         yhw = concat_y(yh[sidx], widx, NCAT, stride)
 
         smape = calc_smape(yt[sidx, widx], yh[sidx, widx], ax=(0, 1))
@@ -588,7 +599,7 @@ def plot_3d(d, name, sidx, widx):
         state["yh3d"].set_data_3d(*yhw.T)
         ret = (state["yt3d"], state["yh3d"])
         if "yinput3d" in state:
-            ywin = concat_rev(yt[sidx], widx, state["nwininput"], stride)
+            ywin = concat_rev(yt_fold, widx, state["nwininput"], stride)
             state["yinput3d"].set_data_3d(*ywin.T)
             ret = (state["yt3d"], state["yh3d"], state["yinput3d"])
         return ret
@@ -636,9 +647,8 @@ def plot_3d(d, name, sidx, widx):
                     sidx = (sidx + 1) % nseries
                     widx = 0
 
-            ytw = concat_y(
-                yt_window(yt[sidx], winsize, stride), widx, state["ncat"], stride
-            )
+            yt_fold = yt_window(yt[sidx], winsize, stride)
+            ytw = concat_y(yt_fold, widx, state["ncat"], stride)
             yhw = concat_y(yh[sidx], widx, state["ncat"], stride)
             if ytw.shape[0] == 1:
                 state["yt3d"].remove()
@@ -649,7 +659,7 @@ def plot_3d(d, name, sidx, widx):
                 state["yt3d"].set_data_3d(*ytw.T)
                 state["yh3d"].set_data_3d(*yhw.T)
                 if "yinput3d" in state:
-                    ywin = concat_rev(yt[sidx], widx, state["nwininput"], stride)
+                    ywin = concat_rev(yt_fold, widx, state["nwininput"], stride)
                     state["yinput3d"].set_data_3d(*ywin.T)
 
             dfo = np.linalg.norm(ytw, axis=-1).min()
