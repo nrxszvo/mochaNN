@@ -83,7 +83,8 @@ def main():
         cfgyml.npts,
         cfgyml.input_size,
         cfgyml.H,
-        args.stride,
+        getattr(cfgyml, "stride", 1),
+        getattr(cfgyml, "spacing", 1),
         batch_size,
         os.cpu_count() - 1,
     )
@@ -110,7 +111,7 @@ def main():
     np.save(
         f"{outdir}/{outname}/{outname}_md.npy",
         {
-            "stride": args.stride,
+            "stride": getattr(cfgyml, "stride", 1),
             "config": cfgyml,
             "shape": y_hat.shape,
             "npts": y_true.shape[1],

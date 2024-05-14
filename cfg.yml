@@ -1,14 +1,16 @@
 random_seed: 42
 strategy: 'auto'
 dtype: 'float32'
-datafile: 'datasets/Lorenz_10Kx10K_balanced.npy'
+datafile: 'datasets/Lorenz_10Kx50K_ppp500_biased_v2.npy'
 ntrain: 9700
 nval: 100 
 ntest: 200
-npts: 10000
-H: 100
-input_size: 500
+npts: 50000
+H: 100 
+input_size: 200 
 batch_size: 512 
+stride: 1 
+spacing: 5
 max_steps: 200000
 val_check_steps: 5000
 lr_scheduler_params:

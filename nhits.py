@@ -205,9 +205,10 @@ class NHITS(nn.Module):
 
         forecast = insample_y[:, -1:, None]  # Level with Naive1
         for block, norm in zip(self.blocks, self.norms):
+            residuals = norm(residuals)
             backcast, block_forecast = block(
                 insample_y=residuals,
             )
-            residuals = norm(residuals - backcast)
+            residuals = residuals - backcast
             forecast = forecast + block_forecast
         return forecast.squeeze(2)

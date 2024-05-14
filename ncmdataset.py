@@ -42,6 +42,7 @@ class NCMDataModule(L.LightningDataModule):
         input_size,
         h,
         stride,
+        spacing,
         batch_size,
         num_workers,
     ):
@@ -58,7 +59,7 @@ class NCMDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         data = np.load(self.datafile, allow_pickle=True).item()
-        self.series = data["solutions"].astype(self.dtype, copy=False)
+        self.series = data["solutions"][:, ::spacing].astype(self.dtype, copy=False)
         self.dt = data["dt"]
 
     def setup(self, stage):

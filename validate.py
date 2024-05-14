@@ -21,7 +21,6 @@ parser.add_argument(
 
 def main():
     args = parser.parse_args()
-    cpfn = args.cp
     cfgfn = args.cfg
     cfgyml = get_config(cfgfn)
 
@@ -69,6 +68,7 @@ def main():
         cfgyml.input_size,
         cfgyml.H,
         stride,
+        getattr(cfgyml, "spacing", 1),
         batch_size,
         os.cpu_count() - 1,
     )

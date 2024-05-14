@@ -26,12 +26,9 @@ parser.add_argument(
     "--tune", action="store_true", default=False, help="run ray hyperparameter tuning"
 )
 parser.add_argument(
-    "--save", default=False, action="store_true", help="save prediction data"
-)
-parser.add_argument(
     "--save_path",
     default="outputs",
-    help="folder for saving predictions",
+    help="folder for saving config and checkpoints",
 )
 parser.add_argument(
     "--outfn",
@@ -140,8 +137,7 @@ def main():
     args = parser.parse_args()
     cfgyml = get_config(args.cfg)
     os.makedirs(args.save_path, exist_ok=True)
-    if args.save:
-        shutil.copyfile(args.cfg, f"{args.save_path}/{args.outfn}.yml")
+    shutil.copyfile(args.cfg, f"{args.save_path}/{args.outfn}.yml")
 
     torch.set_default_dtype(
         torch.float32 if cfgyml.dtype == "float32" else torch.float64
@@ -159,6 +155,7 @@ def main():
             cfgyml.input_size,
             cfgyml.H,
             cfgyml.stride,
+            cfgyml.spacing,
             batch_size,
             os.cpu_count() - 1,
         )
@@ -205,14 +202,6 @@ def main():
         for k, v in config.items():
             print(f"\t{k}:\t{v}")
 
-        if args.save:
-            dm = get_datamodule(cfgyml.batch_size[0], datafile)
-            cp_obj = results.get_best_result().checkpoint
-            cp = cp_obj.path + "/checkpoint.ckpt"
-            model_path = f"{args.save_path}/models"
-            os.makedirs(model_path, exist_ok=True)
-            shutil.copyfile(cp, f"{model_path}/{args.outfn}.ckpt")
-            ncm = NeuralChaosModule.load_from_checkpoint(cp)
     else:
         ncm = get_ncm(
             args.outfn,
@@ -226,21 +215,6 @@ def main():
         dm = get_datamodule(cfgyml.batch_size, cfgyml.datafile)
         ncm.fit(dm)
         config = cfgyml
-
-    if args.save:
-        y_hat, y_true = ncm.predict(dm)
-        datadir = f"{args.save_path}/predictions"
-        os.makedirs(datadir, exist_ok=True)
-        np.save(
-            f"{datadir}/{args.outfn}.npy",
-            {
-                "config": config,
-                "y_true": y_true.numpy(),
-                "y_hat": y_hat.numpy(),
-                "dt": dm.dt,
-            },
-            allow_pickle=True,
-        )
 
 
 if __name__ == "__main__":
