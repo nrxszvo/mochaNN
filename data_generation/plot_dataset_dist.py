@@ -14,10 +14,11 @@ def hist_local_minima(solns, H, L, stride, bins):
         upper = bins[bidx]
         lower = bins[bidx + 1]
         binmembers = (minima <= upper) & (minima > lower)
-        n = np.minimum(H, npts - mindex[binmembers][1] + L + 1).sum() // stride
+        n = np.minimum(H, npts - mindex[binmembers][:, 1] + L + 1).sum() // stride
         hist[upper] += n
         count += n
     hist[float("inf")] = nseries * win_per_srs - count
+    return hist
 
 
 def plot_dataset_dist(bins, npys, labels, png, Hs, Ls, strides):

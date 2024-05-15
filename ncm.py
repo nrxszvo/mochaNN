@@ -16,7 +16,6 @@ class NeuralChaosModule(L.LightningModule):
         h,
         input_size,
         step_size,
-        stride,
         model_params,
         lr_scheduler_params=None,
         loss="MAE",
@@ -33,7 +32,6 @@ class NeuralChaosModule(L.LightningModule):
             model_params | lr_scheduler_params | {"batch_size": batch_size}
         )
         self.step_size = step_size
-        self.stride = stride
         self.h = h
         self.input_size = input_size
         self.model_params = model_params

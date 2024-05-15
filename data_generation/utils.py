@@ -9,6 +9,7 @@ def get_local_minima_from_solutions(solutions):
         s_min, s_idx = get_local_minima(dfo[s])
         minima.extend(s_min)
         mindex.extend([[s, i] for i in s_idx])
+    return np.array(minima), np.array(mindex)
 
 
 def get_local_minima(dfo):

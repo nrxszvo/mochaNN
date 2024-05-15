@@ -23,7 +23,16 @@ parser.add_argument(
     help="prediction file name",
 )
 parser.add_argument(
-    "--stride", default=1, type=int, help="stride for computing windows"
+    "--spacing",
+    default=None,
+    type=int,
+    help="optional spacing to use if npy file is specified",
+)
+parser.add_argument(
+    "--offset",
+    default=None,
+    type=int,
+    help="optional series offset to use if npy file is specified",
 )
 
 
@@ -46,7 +55,7 @@ def main():
     else:
         batch_size = cfgyml.batch_size
 
-    step_size = np.load(cfgyml.datafile, allow_pickle=True).item()["ndim"]
+    step_size = 3  # np.load(cfgyml.datafile, allow_pickle=True).item()["ndim"]
     ncm = NeuralChaosModule.load_from_checkpoint(
         args.cp,
         name="predictor",
@@ -54,10 +63,11 @@ def main():
         h=cfgyml.H,
         input_size=cfgyml.input_size,
         step_size=step_size,
-        stride=args.stride,
         model_params=cfgyml.nhits_params,
         lr_scheduler_params=cfgyml.lr_scheduler_params,
     )
+
+    spacing = getattr(cfgyml, "spacing", 1)
     if args.npy is None:
         npy = cfgyml.datafile
         ntrain = cfgyml.ntrain
@@ -69,6 +79,10 @@ def main():
         nval = 0
         ntest = np.load(npy, allow_pickle=True).item()["solutions"].shape[0]
         batch_size = min(batch_size, ntest)
+        if args.spacing is not None:
+            spacing = args.spacing
+        if args.offset is not None:
+            nval = args.offset
 
     outdir = os.path.dirname(outfn)
     outname = os.path.splitext(os.path.basename(outfn))[0]
@@ -84,7 +98,7 @@ def main():
         cfgyml.input_size,
         cfgyml.H,
         getattr(cfgyml, "stride", 1),
-        getattr(cfgyml, "spacing", 1),
+        spacing,
         batch_size,
         os.cpu_count() - 1,
     )
