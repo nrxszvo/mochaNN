@@ -6,6 +6,7 @@ from collections import defaultdict
 from functools import partial
 import tqdm
 import time
+import datetime
 from utils import get_local_minima_from_solutions
 
 
@@ -54,51 +55,67 @@ def func(N, rpoints, ic):
     return R.y.T
 
 
-def ic_from_trajectory(traj, n_ic, seqlen, perturb, ndim):
-    ic_idx = np.random.choice(len(traj), n_ic)
-    ics = traj[ic_idx] * perturb
-    return ics
-
-
-def ic_from_point(perturb, x0):
-    return perturb * x0
-
-
 def perturb_factors(percent, n_ic, ndim):
     return 1 + percent - (2 * percent) * np.random.random((n_ic, ndim))
 
 
+def generate_ics(n_ic, seqlen, ic_perturb, ic_points):
+    pbf = perturb_factors(ic_perturb, n_ic, NDIM)
+    ic_idx = np.random.choice(len(ic_points), n_ic)
+    ics = ic_points[ic_idx] * pbf
+    return ics
+
+
 def make_multi_ic(
-    name,
     n_ic,
     seqlen,
-    ic_perturb,
     resample_points,
-    ic_method,
-    ic_point,
-    traj,
-    blocks,
-    fn_func,
+    generate_ics,
+    thresh,
+    outdir,
 ):
-    pbf = perturb_factors(ic_perturb, n_ic, NDIM)
+    md = {
+        "model": "Lorenz",
+        "ndim": NDIM,
+        "dt": PERIOD / resample_points,
+        "dt_solver": DT,
+    }
+    np.save(f"{outdir}/md.npy", md, allow_pickle=True)
 
-    if ic_method == "trajectory":
-        ics = ic_from_trajectory(traj, n_ic, seqlen, pbf, NDIM)
-    elif ic_method == "point":
-        ics = ic_from_point(pbf, ic_point)
+    output = np.memmap(
+        f"{outdir}/solutions.npy",
+        dtype="float32",
+        mode="w+",
+        shape=(n_ic, seqlen, NDIM),
+    )
 
     n_proc = os.cpu_count()
-    chunksize = 1
-    sol_per_block = n_ic // blocks
-    total = 0
-    cur_block = 0
     tgt = partial(func, seqlen, resample_points)
+    chunksize = 1
+
+    blocksize = min(n_ic, 10000)
+
+    total = 0
+    ic_idx = 0
+    ics = generate_ics()
+
+    start = time.time()
+    eta = "tbd"
+
     with mp.Pool(processes=n_proc) as pool:
         while total < n_ic:
-            print(f"{n_ic - total} remaining")
+            print(f"{n_ic - total} remaining (eta: {eta})")
+
             solns = []
-            n_ic_block = min(n_ic - total, sol_per_block)
-            cur_ics = ics[cur_block * n_ic_block : (cur_block + 1) * n_ic_block]
+            n_ic_block = min(n_ic - total, blocksize)
+
+            if ic_idx + n_ic_block > len(ics):
+                ics = generate_ics()
+                ic_idx = 0
+
+            cur_ics = ics[ic_idx : ic_idx + n_ic_block]
+            ic_idx += n_ic_block
+
             for sol in tqdm.tqdm(
                 pool.imap_unordered(
                     tgt,
@@ -107,25 +124,21 @@ def make_multi_ic(
                 ),
                 total=n_ic_block,
             ):
-                solns.append(sol)
+                if np.linalg.norm(sol, axis=-1).min() < thresh:
+                    solns.append(sol)
 
-            total += len(solns)
+            nsol = len(solns)
+            if nsol > 0:
+                solns = np.array(solns)
+                output[total : total + nsol] = solns
+                total += nsol
+                print_local_minima(solns)
 
-            solns = np.array(solns)
-            dataset = {
-                "model": "Lorenz",
-                "ndim": NDIM,
-                "dt": PERIOD / resample_points,
-                "dt_solver": DT,
-                "solutions": solns,
-            }
-            np.save(fn_func(cur_block), dataset, allow_pickle=True)
-            cur_block += 1
-
-            start = time.time()
-            print_local_minima(solns)
-            end = time.time()
-            print(f"time to compute local minima: {end-start:.1e} seconds")
+            if total > 0:
+                end = time.time()
+                eta = str(
+                    datetime.timedelta(seconds=(n_ic - total) * (end - start) / total)
+                )
 
 
 if __name__ == "__main__":
@@ -155,54 +168,35 @@ if __name__ == "__main__":
         help="resample points per period",
     )
     parser.add_argument(
-        "--ic_method",
-        default="point",
-        help="method for generation of random initial conditions",
-        choices=["trajectory", "point"],
+        "--ic_points",
+        help="npy containing points to use for initial condition selection",
+        default=None,
     )
     parser.add_argument(
-        "--ic_point",
-        default=None,
+        "--thresh",
+        default=5,
         type=float,
-        nargs="+",
-        help="N-dimensional point to use with 'point' method for ic generation; if None, then the model's default ic will be used",
+        help="require all trajectories to have a minimum L2 less than thresh",
     )
-    parser.add_argument(
-        "--traj",
-        help="trajectories file for use with ic_method==trajectory",
-        default=None,
-    )
-    parser.add_argument("--fn", default=None, help="output filename")
-    parser.add_argument(
-        "--blocks",
-        default=1,
-        type=int,
-        help="number of equal-sized npy files to divide the output among",
-    )
+    parser.add_argument("--outdir", default=None, help="output directory name")
     args = parser.parse_args()
 
-    traj = args.traj
-    if args.traj is not None:
-        traj = np.load(args.traj)
-        nseries, npts, ndim = traj.shape
-        traj = traj.reshape(-1, ndim)
-
-    if args.blocks > 1:
-        outdir = os.path.splitext(os.path.basename(args.fn))[0]
-        os.makedirs(outdir, exist_ok=True)
-        fn_func = lambda blk: f"{outdir}/blk-{blk}.npy"
-    else:
-        fn_func = lambda blk: args.fn
-
-    make_multi_ic(
-        args.model,
+    ic_points = np.load(args.ic_points)
+    ic_points = ic_points.reshape(-1, NDIM)
+    ic_func = partial(
+        generate_ics,
         args.num_ic,
         args.seqlen,
         args.ic_perturb,
+        ic_points,
+    )
+
+    os.makedirs(args.outdir, exist_ok=True)
+    make_multi_ic(
+        args.num_ic,
+        args.seqlen,
         args.resample_points,
-        args.ic_method,
-        args.ic_point,
-        traj,
-        args.blocks,
-        fn_func,
+        ic_func,
+        args.thresh,
+        args.outdir,
     )
