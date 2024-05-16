@@ -142,7 +142,11 @@ def main():
     torch.set_default_dtype(
         torch.float32 if cfgyml.dtype == "float32" else torch.float64
     )
-    step_size = np.load(cfgyml.datafile, allow_pickle=True).item()["ndim"]
+
+    md_file = cfgyml.datafile
+    if os.path.isdir(md_file):
+        md_file = f"{md_file}/md.npy"
+    step_size = np.load(md_file, allow_pickle=True).item()["ndim"]
 
     def get_datamodule(batch_size, datafile):
         return NCMDataModule(

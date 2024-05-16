@@ -72,13 +72,16 @@ def make_multi_ic(
     resample_points,
     generate_ics,
     thresh,
+    offset,
     outdir,
 ):
+    shape = (n_ic, seqlen, NDIM)
     md = {
         "model": "Lorenz",
         "ndim": NDIM,
         "dt": PERIOD / resample_points,
         "dt_solver": DT,
+        "shape": shape,
     }
     np.save(f"{outdir}/md.npy", md, allow_pickle=True)
 
@@ -86,7 +89,7 @@ def make_multi_ic(
         f"{outdir}/solutions.npy",
         dtype="float32",
         mode="w+",
-        shape=(n_ic, seqlen, NDIM),
+        shape=shape,
     )
 
     n_proc = os.cpu_count()
@@ -124,7 +127,7 @@ def make_multi_ic(
                 ),
                 total=n_ic_block,
             ):
-                if np.linalg.norm(sol, axis=-1).min() < thresh:
+                if np.linalg.norm(sol[offset:], axis=-1).min() < thresh:
                     solns.append(sol)
 
             nsol = len(solns)
@@ -178,6 +181,12 @@ if __name__ == "__main__":
         type=float,
         help="require all trajectories to have a minimum L2 less than thresh",
     )
+    parser.add_argument(
+        "--offset",
+        help="offset into solution from which to begin search for L2 minimum",
+        default=200,
+        type=int,
+    )
     parser.add_argument("--outdir", default=None, help="output directory name")
     args = parser.parse_args()
 
@@ -198,5 +207,6 @@ if __name__ == "__main__":
         args.resample_points,
         ic_func,
         args.thresh,
+        args.offset,
         args.outdir,
     )

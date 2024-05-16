@@ -21,7 +21,21 @@ def hist_local_minima(solns, H, L, stride, bins):
     return hist
 
 
-def plot_dataset_dist(bins, npys, labels, png, Hs, Ls, strides, spacings):
+def load_solutions(npy, dstype):
+    if dstype == "map":
+        md = np.load(f"{npy}/md.npy", allow_pickle=True).item()
+        solns = np.memmap(
+            f"{npy}/solutions.npy", dtype="float32", mode="r", shape=md["shape"]
+        )
+        return solns
+    elif dstype == "pickle":
+        d = np.load(npy, allow_pickle=True).item()
+        return d["solutions"]
+    else:
+        raise Exception
+
+
+def plot_dataset_dist(bins, npys, dstypes, labels, png, Hs, Ls, strides, spacings):
     fig, ax = plt.subplots(layout="constrained")
 
     width = 0.333
@@ -31,11 +45,11 @@ def plot_dataset_dist(bins, npys, labels, png, Hs, Ls, strides, spacings):
     # ascending for plot labels
     x = np.array(list(reversed(bins[:-1])) + [bins[0] + 1])
 
-    for i, (npy, name, H, L, stride, spacing) in enumerate(
-        zip(npys, labels, Hs, Ls, strides, spacings)
+    for i, (npy, dstype, name, H, L, stride, spacing) in enumerate(
+        zip(npys, dstypes, labels, Hs, Ls, strides, spacings)
     ):
-        d = np.load(npy, allow_pickle=True).item()
-        solns = d["solutions"][:, ::spacing]
+        solns = load_solutions(npy, dstype)
+        solns = solns[:, ::spacing]
         hist = hist_local_minima(solns, H, L, stride, bins)
         pairs = sorted(hist.items(), key=cmp_to_key(lambda a, b: a[0] - b[0]))
         offset = width * i
@@ -63,12 +77,21 @@ if __name__ == "__main__":
     parser.add_argument("npy", help="dataset file(s)", nargs="+")
     parser.add_argument("png", help="output png filename")
     parser.add_argument(
+        "--dstype",
+        help="dataset type",
+        nargs="+",
+        choices=["map", "pickle"],
+        default=["map"],
+    )
+    parser.add_argument(
         "--labels", default=None, nargs="+", help="labels for each dataset"
     )
-    parser.add_argument("--H", nargs="+", default=100, type=int, help="horizon length")
-    parser.add_argument("--L", nargs="+", default=500, type=int, help="input size")
-    parser.add_argument("--stride", nargs="+", default=1, type=int, help="stride")
-    parser.add_argument("--spacing", nargs="+", default=1, type=int, help="spacing")
+    parser.add_argument(
+        "--H", nargs="+", default=[100], type=int, help="horizon length"
+    )
+    parser.add_argument("--L", nargs="+", default=[500], type=int, help="input size")
+    parser.add_argument("--stride", nargs="+", default=[1], type=int, help="stride")
+    parser.add_argument("--spacing", nargs="+", default=[1], type=int, help="spacing")
     parser.add_argument(
         "--bins",
         nargs="+",
@@ -80,8 +103,16 @@ if __name__ == "__main__":
 
     labels = args.labels
     if labels is None:
-        labels = os.path.splitext(os.path.basename(args.npy))[0]
+        labels = [os.path.splitext(os.path.basename(npy))[0] for npy in args.npy]
 
     plot_dataset_dist(
-        args.bins, args.npy, labels, args.png, args.H, args.L, args.stride, args.spacing
+        args.bins,
+        args.npy,
+        args.dstype,
+        labels,
+        args.png,
+        args.H,
+        args.L,
+        args.stride,
+        args.spacing,
     )

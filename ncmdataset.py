@@ -1,6 +1,7 @@
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import lightning as L
+import os
 
 
 class NCMDataset(Dataset):
@@ -23,7 +24,7 @@ class NCMDataset(Dataset):
         s_idx = idx // self.win_per_series
         w_idx = self.stride * (idx - (s_idx * self.win_per_series))
 
-        window = self.series[s_idx, w_idx : w_idx + self.window_size]
+        window = self.series[s_idx, w_idx : w_idx + self.window_size].copy()
         return {
             "input": window[: self.input_size].reshape(-1),
             "target": window[self.input_size :].reshape(-1),
@@ -58,9 +59,20 @@ class NCMDataModule(L.LightningDataModule):
         self.stride = stride
         self.batch_size = batch_size
         self.num_workers = num_workers
-        data = np.load(self.datafile, allow_pickle=True).item()
-        self.series = data["solutions"][:, ::spacing].astype(self.dtype, copy=False)
-        self.dt = data["dt"]
+        if os.path.isdir(self.datafile):
+            md = np.load(f"{self.datafile}/md.npy", allow_pickle=True).item()
+            solns = np.memmap(
+                f"{self.datafile}/solutions.npy",
+                mode="r",
+                dtype="float32",
+                shape=md["shape"],
+            )
+            self.dt = md["dt"]
+        else:
+            data = np.load(self.datafile, allow_pickle=True).item()
+            solns = data["solutions"]
+            self.dt = data["dt"]
+        self.series = solns[:, ::spacing].astype(self.dtype, copy=False)
 
     def setup(self, stage):
         if stage == "fit":
