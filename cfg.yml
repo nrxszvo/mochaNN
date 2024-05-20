@@ -22,6 +22,7 @@ lr_scheduler_params:
   min_lr: 1.e-9
 loss: "MAE"
 nhits_params:
+  version: 2
   n_stacks: 4
   n_pool_kernel_size: [10,4,2,1]
   n_freq_downsample: [25,12,6,1]
