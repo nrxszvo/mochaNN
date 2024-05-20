@@ -82,7 +82,13 @@ class NCMDataModule(L.LightningDataModule):
                 self.h,
                 self.stride,
             )
-        if stage in ["fit", "validate"]:
+            self.valset = NCMDataset(
+                self.series[self.ntrain : self.ntrain + self.nval, : self.npts],
+                self.input_size,
+                self.h,
+                self.stride,
+            )
+        if stage == "validate":
             self.valset = NCMDataset(
                 self.series[self.ntrain : self.ntrain + self.nval, : self.npts],
                 self.input_size,
