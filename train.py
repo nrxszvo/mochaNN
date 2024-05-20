@@ -179,7 +179,6 @@ def main():
             cfgyml.H,
             cfgyml.input_size,
             step_size,
-            cfgyml.stride,
             nhits_params,
             lr_scheduler_params,
             cfgyml.loss,
