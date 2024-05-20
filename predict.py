@@ -73,16 +73,17 @@ def main():
         ntrain = cfgyml.ntrain
         nval = cfgyml.nval
         ntest = cfgyml.ntest
+        npts = cfgyml.npts
     else:
         npy = args.npy
         ntrain = 0
         nval = 0
-        ntest = np.load(npy, allow_pickle=True).item()["solutions"].shape[0]
-        batch_size = min(batch_size, ntest)
+        nseries, npts, ndim = np.load(npy, allow_pickle=True).item()["solutions"].shape
         if args.spacing is not None:
             spacing = args.spacing
         if args.offset is not None:
             nval = args.offset
+        ntest = nseries - nval
 
     outdir = os.path.dirname(outfn)
     outname = os.path.splitext(os.path.basename(outfn))[0]
@@ -94,7 +95,7 @@ def main():
         ntrain,
         nval,
         ntest,
-        cfgyml.npts,
+        npts,
         cfgyml.input_size,
         cfgyml.H,
         getattr(cfgyml, "stride", 1),
