@@ -7,7 +7,7 @@ from functools import partial
 import tqdm
 import time
 import datetime
-from utils import get_local_minima_from_solutions
+from .utils import get_local_minima_from_solutions
 
 
 def print_local_minima(solns, bins=[5, 4, 3, 2, 1]):
@@ -38,7 +38,7 @@ PERIOD = 1.5008
 DT = 0.0001801
 
 
-def func(N, rpoints, ic):
+def solve_lorenz(N, rpoints, method, ic):
     tlim = PERIOD * N / rpoints
     t_eval = np.linspace(0, tlim - tlim / N, N)
     R = solve_ivp(
@@ -47,8 +47,7 @@ def func(N, rpoints, ic):
         ic,
         t_eval=t_eval,
         first_step=DT,
-        method="Radau",
-        vectorized=True,
+        method=method,
     )
     if R.status != 0:
         raise Exception(f"solve_ivp error: {R.message}")
@@ -93,7 +92,7 @@ def make_multi_ic(
     )
 
     n_proc = os.cpu_count()
-    tgt = partial(func, seqlen, resample_points)
+    tgt = partial(solve_lorenz, seqlen, resample_points, "Radau")
     chunksize = 1
 
     blocksize = min(n_ic, 10000)
