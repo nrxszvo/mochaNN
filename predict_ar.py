@@ -3,6 +3,7 @@ import torch
 from nhits import NHITS
 from config import get_config
 import numpy as np
+import os
 
 
 class Wrapper(torch.nn.Module):
@@ -42,18 +43,24 @@ parser.add_argument(
     help="optional npy file containing trajectories to predict (overrides datafile from cfg)",
 )
 args = parser.parse_args()
+
 cfgyml = get_config(args.cfg)
+spacing = getattr(cfgyml, "spacing", 1)
+
 cp = torch.load(args.cp, map_location="cpu")
 
 if args.npy is not None:
-    test_series = np.load(args.npy, allow_pickle=True).item()["solutions"]
+    dset = np.load(args.npy, allow_pickle=True).item()
+    test_series = dset["solutions"]
 else:
-    series = np.load(cfgyml.datafile, allow_pickle=True).item()["solutions"]
-    test_series = series[cfgyml.ntrain + cfgyml.nval :]
+    dset = np.load(cfgyml.datafile, allow_pickle=True).item()
+    test_series = dset["solutions"][cfgyml.ntrain + cfgyml.nval :]
 
+test_series = test_series[:, ::spacing]
 ntest, npts, ndim = test_series.shape
 H = cfgyml.H
 L = cfgyml.input_size
+npts -= L
 Hf = H * ndim
 Lf = L * ndim
 
@@ -68,6 +75,16 @@ outputs = torch.empty((ntest, npts * ndim)).to(device)
 outputs[:, :Lf] = inputs
 idx = Lf
 
+os.makedirs(args.outfn, exist_ok=True)
+yt_map = np.memmap(
+    f"{args.outfn}/ytrue.npy", mode="w+", dtype="float32", shape=(ntest, npts, ndim)
+)
+yt_map[:] = test_series[:, L:]
+
+yh_map = np.memmap(
+    f"{args.outfn}/yhat.npy", mode="w+", dtype="float32", shape=(ntest, npts, ndim)
+)
+
 if args.inc is not None:
     inc = args.inc * ndim
 else:
@@ -78,10 +95,14 @@ while idx < npts * ndim:
         hpred = model(outputs[:, idx - Lf : idx])
         rem = min(inc, npts * ndim - idx)
         outputs[:, idx : idx + rem] = hpred[:, :rem]
+    outidx = idx // ndim - L
+    outwin = outputs[:, idx : idx + rem].reshape(ntest, -1, ndim).cpu().numpy()
+    yh_map[:, outidx : outidx + outwin.shape[1]] = outwin
     idx += inc
+
 print()
 np.save(
-    args.outfn,
-    {"config": cfgyml, "y_true": test_series, "y_hat": outputs.cpu().numpy()},
+    f"{args.outfn}/md.npy",
+    {"mode": "ar", "dt": dset["dt"], "config": cfgyml, "shape": (ntest, npts, ndim)},
     allow_pickle=True,
 )
