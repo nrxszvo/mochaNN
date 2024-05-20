@@ -115,36 +115,45 @@ def get_min_dist_errors(yt, yh, stride):
     return np.array(final_minima), np.array(max_errs), indices, np.array(smapes)
 
 
-def plot_dfo_vs_max_err(fig, ax, d, name):
+def plot_dfo_vs_max_err(fig, ax, ds):
     # maximum errors for windows that include distance-from-origin local minima
-    yt = d["y_true"]
-    yh = d["y_hat"]
-    stride = d["stride"]
-    nseries, nwin, winsize, ndim = yh.shape
-    dfos, errs, indices, smapes = get_min_dist_errors(yt, yh, stride)
-    ax.scatter(dfos, errs, s=5, label=name, alpha=0.4)
+    state = {}
+    all_smapes = {}
+    ds = {name: d for d, name in ds}
+    for name, d in ds.items():
+        print(f"analyzing {name}...")
+        yt = d["y_true"]
+        yh = d["y_hat"]
+        stride = d["stride"]
+        nseries, nwin, winsize, ndim = yh.shape
+        dfos, errs, indices, smapes = get_min_dist_errors(yt, yh, stride)
+        ax.scatter(dfos, errs, s=5, label=name, alpha=0.4)
 
-    ffit = Polynomial.fit(dfos, errs, 10)
-    x = np.sort(dfos)
-    ax.plot(x, ffit(x), label="best-fit", alpha=0.6)
+        ffit = Polynomial.fit(dfos, errs, 9)
+        x = np.sort(dfos)
+        ax.plot(x, ffit(x), label="best-fit", alpha=0.3)
+        state[name] = (dfos, errs, indices)
+        all_smapes[name] = smapes
 
     # double click opens 3d plot of corresponding window
-    def onclick(fig, ax, name, dfos, errs, indices, e):
+    def onclick(fig, ax, state, e):
         if e.inaxes is ax:
             if e.dblclick:
                 dist = e.xdata
                 err = e.ydata
-                selected = np.argmin((errs - err) ** 2 + (dfos - dist) ** 2)
-                sidx, widx = indices[selected]
-                plot_3d(d, name, sidx, widx)
+                for name in state:
+                    dfos, errs, indices = state[name]
+                    selected = np.argmin((errs - err) ** 2 + (dfos - dist) ** 2)
+                    sidx, widx = indices[selected]
+                    plot_3d(ds[name], name, sidx, widx)
                 plt.show()
 
     fig.canvas.mpl_connect(
         "button_press_event",
-        partial(onclick, fig, ax, name, dfos, errs, indices),
+        partial(onclick, fig, ax, state),
     )
 
-    return smapes
+    return all_smapes
 
 
 def series_stats(yt, yh, winsize, stride, sidx):
@@ -268,12 +277,10 @@ def plot_dist(ds):
     if len(ds) == 1:
         axesWErr = [axesWErr]
 
+    # maximum errors for windows that include distance-from-origin local minima
+    smapes = plot_dfo_vs_max_err(figDFO, axDFO, ds)
+
     for i, ((d, name), axWErr) in enumerate(zip(ds, axesWErr)):
-        print(f"analyzing {name}...")
-
-        # maximum errors for windows that include distance-from-origin local minima
-        smapes = plot_dfo_vs_max_err(figDFO, axDFO, d, name)
-
         # per series window errors
         plot_average_window_error_per_series(d, name, figWErr, axWErr)
         if name == ds[-1][1]:
@@ -282,9 +289,11 @@ def plot_dist(ds):
         # 3d plot of window errors, series index X window index X smape error
         axHist3d = plt.figure().add_subplot(projection="3d")
         xs, ys = np.meshgrid(
-            np.arange(smapes.shape[0]), np.arange(smapes.shape[1]), indexing="ij"
+            np.arange(smapes[name].shape[0]),
+            np.arange(smapes[name].shape[1]),
+            indexing="ij",
         )
-        pts = np.stack([xs, ys, smapes])
+        pts = np.stack([xs, ys, smapes[name]])
         for sidx in range(pts.shape[1]):
             axHist3d.plot(*pts[:, sidx])
         axHist3d.set_xlabel("series index")
@@ -300,9 +309,11 @@ def plot_dist(ds):
         """
 
         # histogram of average window errors
-        axHist.hist(smapes.reshape(-1), bins=100, density=True, alpha=0.6, label=name)
+        axHist.hist(
+            smapes[name].reshape(-1), bins=100, density=True, alpha=0.6, label=name
+        )
         vs, edges, patches = axHistT.hist(
-            smapes.reshape(-1),
+            smapes[name].reshape(-1),
             bins=100,
             cumulative=True,
             histtype="step",
@@ -586,7 +597,8 @@ def plot_3d(d, name, sidx, widx):
     ax.set_zlim3d(bottom=0, top=50)
     dfo = np.linalg.norm(ytw, axis=-1).min()
     ax.set_title(
-        f"Window {widx} - sMAPE Error: {smape:.2f} - DFO {dfo:.1f}", loc="left"
+        f"{name} - Series {sidx} - Window {widx} - sMAPE Error: {smape:.2f} - DFO {dfo:.1f}",
+        loc="left",
     )
 
     def update(yt, yh, ax, state, frame):
@@ -741,15 +753,18 @@ def collect_available(pattern, dirname, mode="single"):
 
                     available.append((f"{curdir}/{fn}", name))
         elif mode == "map":
-            for dn in dns:
-                if "map" in dn:
-                    available.append((f"{curdir}/{dn}", dn))
-    return available
+            available.extend([(f"{curdir}/{dn}", dn) for dn in dns])
+    return sorted(available, key=lambda a: a[0])
 
 
 def choices_menu(available, func, load_func):
-    for i, (fn, name) in enumerate(available):
-        print(f"{i}: {name}")
+    def print_opts():
+        print()
+        for i, (fn, name) in enumerate(available):
+            print(f"{i}: {name}")
+        print()
+
+    print_opts()
     choices = []
     while True:
         inp = input("idx to add (a for all): ")
@@ -759,6 +774,7 @@ def choices_menu(available, func, load_func):
             if len(choices) > 0:
                 func([(load_func(fn), name) for fn, name in choices])
                 choices = []
+                print_opts()
             else:
                 break
         else:
@@ -792,18 +808,39 @@ def plot_3d_menu(ds):
 def print_metadata(ds):
     for d, name in ds:
         yt, yh = get_ys(d)
-        mae = calc_mae(yt, yh)
-        smape = calc_smape(yt, yh)
+        if yt.ndim == 3:
+            nseries, nwin, winsize, ndim = yh.shape
+            stride = d["stride"]
+            maes = []
+            smapes = []
+            for sidx in tqdm.tqdm(range(nseries)):
+                yt_win = yt_window(yt[sidx], winsize, stride)
+                maes.append(calc_mae(yt_win, yh[sidx], ax=(0, 1, 2)))
+                smapes.append(calc_smape(yt_win, yh[sidx], ax=(0, 1, 2)))
+            mae = np.mean(maes)
+            smape = np.mean(smapes)
+        else:
+            mae = calc_mae(yt, yh)
+            smape = calc_smape(yt, yh)
+
         print()
         print(name)
         if "dataset" in d:
             print(f'\tdataset: {d["dataset"]}')
-        print(f"\tMAE: {mae:.3f}")
-        print(f"\tsMAPE: {smape:.3f}")
+        print(f"\tMAE: {mae:.4f}")
+        print(f"\tsMAPE: {smape:.4f}")
         print("\tconfig:")
-        for k, v in d["config"].items():
-            print(f"\t\t{k}: {v}")
-    print()
+        cfg = d["config"]
+        if not isinstance(cfg, dict):
+            cfg = cfg.__dict__
+        for k, v in cfg.items():
+            if isinstance(v, dict):
+                print(f"\t\t{k}:")
+                for vk, vv in v.items():
+                    print(f"\t\t\t{vk}: {vv}")
+            else:
+                print(f"\t\t{k}: {v}")
+    input("\n<enter> to continue")
 
 
 def plot_trajectories_menu(available):
@@ -844,7 +881,7 @@ if __name__ == "__main__":
         "--pattern", default="(.*).npy", help="re for matching npy files"
     )
     parser.add_argument(
-        "--dirname", default="predictions", help="prediction data directory"
+        "--dirname", default="predictions/maps", help="prediction data directory"
     )
     parser.add_argument(
         "--ncat",
