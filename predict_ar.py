@@ -57,10 +57,10 @@ else:
     test_series = dset["solutions"][cfgyml.ntrain + cfgyml.nval :]
 
 test_series = test_series[:, ::spacing]
-ntest, npts, ndim = test_series.shape
+ntest, n_total_pts, ndim = test_series.shape
 H = cfgyml.H
 L = cfgyml.input_size
-npts -= L
+npts = n_total_pts - L
 Hf = H * ndim
 Lf = L * ndim
 
@@ -70,7 +70,7 @@ model = Wrapper(Hf, Lf, cfgyml.nhits_params, cp["state_dict"], device)
 model.eval()
 
 inputs = torch.from_numpy(test_series[:, :L].reshape(ntest, -1)).type(torch.float32)
-outputs = torch.empty((ntest, npts * ndim)).to(device)
+outputs = torch.empty((ntest, n_total_pts * ndim)).to(device)
 
 outputs[:, :Lf] = inputs
 idx = Lf
@@ -89,11 +89,11 @@ if args.inc is not None:
     inc = args.inc * ndim
 else:
     inc = Hf
-while idx < npts * ndim:
+while idx < n_total_pts * ndim:
     print(idx, end="\r")
     with torch.no_grad():
         hpred = model(outputs[:, idx - Lf : idx])
-        rem = min(inc, npts * ndim - idx)
+        rem = min(inc, n_total_pts * ndim - idx)
         outputs[:, idx : idx + rem] = hpred[:, :rem]
     outidx = idx // ndim - L
     outwin = outputs[:, idx : idx + rem].reshape(ntest, -1, ndim).cpu().numpy()
