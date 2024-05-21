@@ -8,6 +8,7 @@ import numpy as np
 import tqdm
 
 from data_generation.generate_dataset import PERIOD, solve_lorenz
+from data_generation.utils import get_local_minima_from_solutions
 
 plt.rcParams["keymap.back"].remove("left")
 plt.rcParams["keymap.forward"].remove("right")
@@ -221,6 +222,17 @@ def compare_ivp(ytrue, yhat, dt):
     ax.legend()
 
 
+def print_minima(yhat, dt, nprint=10):
+    minima, mindex = get_local_minima_from_solutions(yhat)
+    sortidx = np.argsort(minima)
+    print(f"Top {nprint} local minima:")
+    for i in range(nprint):
+        idx = sortidx[i]
+        print(
+            f"\t{minima[idx]:.2f} @ Series {mindex[idx][0]}, {dt*mindex[idx][1]:.2f}s"
+        )
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -264,6 +276,8 @@ if __name__ == "__main__":
 
     spacing = getattr(md["config"], "spacing", 1)
     dt = spacing * md["dt"]
+
+    print_minima(yhat, dt)
 
     if args.compare_ivp:
         compare_ivp(ytrue, yhat, dt)
