@@ -36,16 +36,16 @@ def plot_compare_full(yt, yh, ncomp, npts):
     fig = plt.figure()
     series = np.random.choice(yt.shape[0], ncomp, replace=False)
 
-    gs = gridspec.GridSpec(ncomp, 2)
+    gs = gridspec.GridSpec(2, ncomp)
     gs.update(wspace=0, hspace=0)
 
     def plot(data, idx, color):
-        ax = fig.add_subplot(gs[2 * i + idx], projection="3d")
+        ax = fig.add_subplot(gs[ncomp * idx + i], projection="3d")
         ax.plot(*data.T, color=color)
         ax.set_xticklabels([])
         ax.set_yticklabels([])
         ax.set_zticklabels([])
-        if i == 0:
+        if i == ncomp // 2:
             ax.set_title("IVP Solver" if idx == 0 else "Model 3")
 
     for i, s in enumerate(series):
@@ -54,7 +54,7 @@ def plot_compare_full(yt, yh, ncomp, npts):
     fig.subplots_adjust(bottom=0, top=0.9)
 
 
-def plot_3d(yh, yt, sidx, winsize, dt, scores):
+def plot_3d(yh, yt, sidx, winsize, dt, scores, minimal=False):
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
 
@@ -77,28 +77,37 @@ def plot_3d(yh, yt, sidx, winsize, dt, scores):
 
     ytwin = yt[sidx, startidx:endidx]
     yt3d = ax.plot(*ytwin.T, label="reference", alpha=1)[0]
-
     yhwin = yh[sidx, startidx:endidx]
     yh3d = ax.plot(*yhwin.T, label="prediction", alpha=1)[0]
 
-    ax.legend(loc="upper right", bbox_to_anchor=(1, 1), bbox_transform=fig.transFigure)
+    if not minimal:
+        ax.legend(
+            loc="upper right", bbox_to_anchor=(1, 0.9), bbox_transform=fig.transFigure
+        )
 
     err = np.linalg.norm(ytwin - yhwin, axis=1).max()
     dfo = np.linalg.norm(ytwin, axis=1).min()
 
     def title(sidx, endidx, err, dfo):
-        ax.set_title(
-            f"""
-                           series {sidx}
-
-                   time = {dt*endidx:.2f},    max L2 diff = {err:.2f} dfo = {dfo:.2f}
-            """,
-            y=1,
-            x=0.3,
-        )
+        if minimal:
+            ax.set_title(f"series {sidx}, time = {dt*endidx:.2f}", y=0.85, x=0.5)
+        else:
+            ax.set_title(
+                f"""
+                                series {sidx}
+                
+                      time = {dt*endidx:.2f},    max L2 diff = {err:.2f} dfo = {dfo:.2f}
+                """,
+                y=0.9,
+                x=0.2,
+            )
 
     title(sidx, endidx, err, dfo)
-    # fig.subplots_adjust(left=-0.1, right=1.1, bottom=-0.1, top=1.1)
+    btm = -0.1
+    top = 0.9
+    if minimal:
+        top = 1.1
+    fig.subplots_adjust(left=-0.1, right=1.1, bottom=btm, top=top)
 
     def onkeypress(yh, yt, fig, ax, state, e):
         sidx = state["sidx"]
@@ -164,6 +173,10 @@ def plot_3d(yh, yt, sidx, winsize, dt, scores):
             startidx = npts - (endidx - startidx)
             endidx = npts
             update_plot(sidx, startidx, endidx)
+        elif e.key == "h":
+            state["yt3d"].set_visible(not state["yt3d"].get_visible())
+            fig.canvas.draw_idle()
+            ax.set_title("")
 
     fig.canvas.mpl_connect(
         "key_press_event",
@@ -233,6 +246,27 @@ def print_minima(yhat, dt, nprint=10):
         )
 
 
+def statistics(model, solver, dt):
+    def exp_k2(y, k=2):
+        return np.exp(-(y[:, :, k].astype(np.float64) ** 2) / 2)
+
+    coords = ["x", "y", "z"]
+    for k in range(3):
+        solver_k = exp_k2(solver, k).reshape(-1)
+        model_k = exp_k2(model, k).reshape(-1)
+
+        fig, ax = plt.subplots()
+
+        ax.hist(solver_k, bins=50, density=True, alpha=0.6, label="Solver")
+        ax.hist(model_k, bins=50, density=True, alpha=0.6, label="Model")
+
+        ax.set_xlabel(f"exp(-{coords[k]}**2 / 2)")
+        ax.set_yscale("log")
+        ax.set_ylabel("density")
+        ax.set_title(f"Histogram of {coords[k]}-coordinate statistic")
+        ax.legend()
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -263,6 +297,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--npts", default=None, type=int, help="number of points per series to plot"
+    )
+    parser.add_argument(
+        "--minimal", action="store_true", default=False, help="minimal plot annotation"
     )
     args = parser.parse_args()
 
@@ -298,8 +335,9 @@ if __name__ == "__main__":
     if winsize is None:
         winsize = md["config"].H
 
+    statistics(yhat, ytrue, dt)
     plot_compare_full(ytrue, yhat, 5, npts)
-    plot_3d(yhat, ytrue, args.series, winsize, dt, scores)
+    plot_3d(yhat, ytrue, args.series, winsize, dt, scores, args.minimal)
 
     plt.show()
     plt.close()

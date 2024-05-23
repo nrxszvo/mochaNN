@@ -21,7 +21,6 @@ plt.rcParams["keymap.home"].remove("r")
 
 def load_map(dn):
     fns = [fn for fn in os.listdir(dn) if fn.endswith("npy")]
-    assert len(fns) == 3
     data = {}
     mdfn = list(filter(lambda fn: "md" in fn, fns))[0]
     d = np.load(f"{dn}/{mdfn}", allow_pickle=True).item()
@@ -29,14 +28,20 @@ def load_map(dn):
         data[k] = v
 
     for fn in fns:
-        nseries, nwin, winsize, ndim = data["shape"]
-        npts = data["npts"]
+        if len(data["shape"]) == 3:
+            nseries, npts, ndim = data["shape"]
+        else:
+            nseries, nwin, winsize, ndim = data["shape"]
+            npts = data["npts"]
         if "yhat" in fn:
             shape = (nseries, nwin, winsize, ndim)
             k = "y_hat"
         elif "ytrue" in fn:
             shape = (nseries, npts, ndim)
             k = "y_true"
+        elif "solutions" in fn:
+            shape = (nseries, npts, ndim)
+            k = "solutions"
         else:
             continue
         d = np.memmap(f"{dn}/{fn}", dtype="float32", mode="r", shape=shape)
@@ -342,106 +347,10 @@ def plot_dist(ds):
     plt.close()
 
 
-def plot_hist_prog_menu(available):
-    fnsets = []
-    names = []
-
-    while True:
-        fns = []
-        name = input(f"enter name of group {len(fnsets)}: ")
-        if name == "":
-            break
-        names.append(name)
-        while True:
-            for i, (fn, name) in enumerate(available):
-                print(f"{i}: {name}")
-            idx = input(f"enter index for next member of {names[-1]}: ")
-            if idx == "":
-                break
-            fns.append(available[int(idx)][0])
-        fnsets.append(fns)
-    plot_hist_progressive(fnsets, names)
+CRITICAL_POINTS = np.array([[0, 0, 0], [8.49, 8.49, 27], [-8.49, -8.49, 27]])
 
 
-def plot_hist_progressive(fns, names):
-    figHist, axHist = plt.subplots()
-    axHistT = axHist.twinx()
-    axDFOIdx = plt.figure().add_subplot()
-    for fnset, name in zip(fns, names):
-        smapes = []
-        yt_flat = []
-        for fn in fnset:
-            d = load(fn)
-            yt, yh = get_ys(d)
-            stride = d["stride"] if "stride" in d else 1
-            smape = calc_smape(yt, yh, ax=(2, 3))
-            smapes.append(smape)
-            nseries, nwin, winsize, ndim = yt.shape
-            yt_flat.append(yt[:, :: winsize // stride].reshape(nseries, -1, ndim))
-            del yt
-            del yh
-        smape = np.concatenate(smapes)
-        axHist.hist(smape.reshape(-1), bins=100, density=True, alpha=0.6, label=name)
-        vs, edges, patches = axHistT.hist(
-            smape.reshape(-1),
-            bins=100,
-            cumulative=True,
-            histtype="step",
-            density=True,
-            label=f"{name} CDF",
-        )
-        patches[0].set_xy(patches[0].get_xy()[:-1])
-
-        # maximum errors for windows that include distance-from-origin local minima
-        dfos, errs, _ = get_min_dist_errors(
-            smape, stride, yt_flat=np.concatenate(yt_flat), winsize=winsize
-        )
-        axDFOIdx.scatter(dfos, errs, s=5, label=name, alpha=0.6)
-
-    axHist.set_xlabel("sMAPE")
-    axHist.set_ylabel("density")
-    axHist.set_yscale("log")
-    axHistT.set_ylabel("cumulative likelihood")
-
-    axDFOIdx.set_xlabel("distance from origin")
-    axDFOIdx.set_ylabel("sMAPE")
-    axDFOIdx.legend()
-    axDFOIdx.set_title("Minimum distance from origin vs. maximum sMAPE")
-
-    figHist.legend(bbox_to_anchor=(0.88, 0.82))
-    plt.show()
-    plt.close()
-
-
-def plot_summary(ds):
-    names = []
-    errs = []
-    for d, name in ds:
-        names.append(name)
-        yt, yh = get_ys(d)
-        errs.append(calc_smape(yt, yh))
-    plt.bar(names, errs)
-    plt.xticks(rotation=90)
-    plt.tight_layout()
-    plt.show()
-    plt.close()
-
-
-def plot_summary_menu(available):
-    for i, (name, fn) in enumerate(available):
-        print(f"{i}: {name}")
-    inp = input("plot all or select? [a|s]: ")
-    if inp == "a":
-        plot_summary([(load(fn), name) for name, fn in available])
-    else:
-        choices_menu(available, plot_summary)
-
-
-critical_points = np.array([[0, 0, 0], [8.49, 8.49, 27], [-8.49, -8.49, 27]])
-
-
-def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
-    yt = d["data"] if "data" in d else d["solutions"]
+def plot_3d_ref(solns, name, sidx, eidx, pstart, pend):
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
 
@@ -449,29 +358,29 @@ def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
     ax.set_ylim3d(bottom=-20, top=20)
     ax.set_zlim3d(bottom=0, top=50)
 
-    cps = ax.scatter(*critical_points.T, label="critical points", color="purple")
+    cps = ax.scatter(*CRITICAL_POINTS.T, label="critical points", color="purple")
     axObjs = []
     for i in range(sidx, eidx + 1):
-        yti = yt[i, pstart:pend]
+        yti = solns[i, pstart:pend]
         ao = ax.plot(*yti.T)[0]
         axObjs.append(ao)
     ax.legend(loc="upper right", bbox_to_anchor=(1, 1), bbox_transform=fig.transFigure)
     fig.subplots_adjust(top=1.05, bottom=0.05)
 
-    def update(yt, ax, state, frame):
+    def update(solns, ax, state, frame):
         pstart = state["pstart"] + frame
         pend = state["pend"] + frame
         sidx = state["sidx"]
         eidx = state["eidx"]
         for s, ao in zip(range(sidx, eidx + 1), state["axObjs"]):
-            yti = yt[s, pstart:pend]
+            yti = solns[s, pstart:pend]
             ao.set_data_3d(*yti.T)
         return state["axObjs"]
 
-    def onkeypress(yt, fig, ax, state, e):
+    def onkeypress(solns, fig, ax, state, e):
         pstart = state["pstart"]
         pend = state["pend"]
-        nseries, winsize, ndim = yt.shape
+        nseries, winsize, ndim = solns.shape
         sidx = state["sidx"]
         eidx = state["eidx"]
         if e.key in ["left", "right"]:
@@ -486,7 +395,7 @@ def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
                     pend += 1
 
             for i in range(eidx + 1 - sidx):
-                state["axObjs"][i].set_data_3d(*yt[sidx + i, pstart:pend].T)
+                state["axObjs"][i].set_data_3d(*solns[sidx + i, pstart:pend].T)
 
             state["pstart"] = pstart
             state["pend"] = pend
@@ -499,7 +408,7 @@ def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
                 fig,
                 func=partial(
                     update,
-                    yt,
+                    solns,
                     ax,
                     state,
                 ),
@@ -526,7 +435,7 @@ def plot_3d_ref(d, name, sidx, eidx, pstart, pend):
         "key_press_event",
         partial(
             onkeypress,
-            yt,
+            solns,
             fig,
             ax,
             {
@@ -580,7 +489,7 @@ def plot_3d(d, name, sidx, widx):
 
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
-    ax.scatter(*critical_points.T, label="critical points", color="purple")
+    ax.scatter(*CRITICAL_POINTS.T, label="critical points", color="purple")
     smape = calc_smape(ytw, yhw, ax=(0, 1))
     if ytw.shape[0] == 1:
         yt3d = ax.scatter(*ytw.T, label="reference")
@@ -789,22 +698,6 @@ def choices_menu(available, func, load_func):
                 print(e)
 
 
-def plot_3d_menu(ds):
-    if len(ds) > 1:
-        raise Exception("plot_3d only supports one dataset")
-    d, name = ds[0]
-    try:
-        nser = d["y_true"].shape[0]
-        nwin = d["y_true"].shape[1]
-        resp = input(f"{name}: series and window to plot [0, {nser-1}].[0, {nwin-1}]: ")
-        sidx, widx = resp.split(".")
-        plot_3d(d, name, int(sidx), int(widx))
-    except Exception as e:
-        print(e)
-    plt.show()
-    plt.close()
-
-
 def print_metadata(ds):
     for d, name in ds:
         yt, yh = get_ys(d)
@@ -843,7 +736,7 @@ def print_metadata(ds):
     input("\n<enter> to continue")
 
 
-def plot_trajectories_menu(available):
+def plot_trajectories_menu(available, load_func):
     for i, (name, _) in enumerate(available):
         print(f"{i}: {name}")
     while True:
@@ -852,8 +745,8 @@ def plot_trajectories_menu(available):
             c = int(inp)
             fn = available[c][0]
             name = available[c][1]
-            d = load(fn)
-            k = "data" if "data" in d else "solutions"
+            d = load_func(fn)
+            k = "solutions" if "solutions" in d else "data"
             nseries, winsize, ndim = d[k].shape
             first = int(input(f"first series [0, {nseries-1}]: "))
             last = int(input(f"last series [{first}, {nseries-1}]: "))
@@ -862,7 +755,7 @@ def plot_trajectories_menu(available):
             n = input("optional title for plot: ")
             if n != "":
                 name = n
-            plot_3d_ref(d, name, first, last, pstart, pend)
+            plot_3d_ref(d[k], name, first, last, pstart, pend)
             plt.show()
             plt.close()
         except Exception as e:
@@ -922,19 +815,15 @@ if __name__ == "__main__":
         load_func = load_map
 
     while True:
-        opt = input("enter dist|summary|3d|info|trajectories|histprog: ")
+        opt = input("enter dist|summary|info|trajectories: ")
 
         if opt == "dist":
             choices_menu(available, plot_dist, load_func)
-        elif opt == "3d":
-            choices_menu(available, plot_3d_menu, load_func)
         elif opt == "summary":
             plot_summary_menu(available)
         elif opt == "info":
             choices_menu(available, print_metadata, load_func)
         elif opt == "trajectories":
-            plot_trajectories_menu(available)
-        elif opt == "histprog":
-            plot_hist_prog_menu(available)
+            plot_trajectories_menu(available, load_func)
         else:
             break
