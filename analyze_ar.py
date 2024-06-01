@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import os
 from functools import partial
+from collections import defaultdict
 
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
@@ -54,7 +55,7 @@ def plot_compare_full(yt, yh, ncomp, npts):
     fig.subplots_adjust(bottom=0, top=0.9)
 
 
-def plot_3d(yh, yt, sidx, winsize, dt, scores, minimal=False):
+def plot_3d(yh, yt, coords, winsize, dt, minimal=False):
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
 
@@ -72,8 +73,15 @@ def plot_3d(yh, yt, sidx, winsize, dt, scores, minimal=False):
     ax.zaxis.set_ticklabels([])
     ax.view_init(elev=15, azim=-45)
     ax.scatter(*critical_points.T, label="critical points", color="purple")
+
+    sidx = 0
+    zcrit = None
+    if sidx in coords:
+        zs = np.array([yh[sidx, zidx] for zidx in coords[sidx]])
+        zcrit = ax.scatter(*zs.T, label="z-critical", color="lime")
+
     startidx = 0
-    endidx = winsize
+    endidx = startidx + winsize
 
     ytwin = yt[sidx, startidx:endidx]
     yt3d = ax.plot(*ytwin.T, label="reference", alpha=1)[0]
@@ -132,12 +140,47 @@ def plot_3d(yh, yt, sidx, winsize, dt, scores, minimal=False):
 
             fig.canvas.draw_idle()
 
-        if e.key in ["b", "f"]:
-            if e.key == "b":
-                startidx = max(0, startidx - winsize)
-            else:
+        if e.key in ["b", "f", "B", "F"]:
+            if e.key == "B":
                 startidx = min(endidx - winsize, startidx + winsize)
+            elif e.key == "b":
+                startidx = max(0, startidx - winsize)
+            elif e.key == "F":
+                endidx = max(startidx + winsize, endidx - inc)
+            else:
+                endidx = min(endidx + inc, yh.shape[1])
+
             update_plot(sidx, startidx, endidx)
+
+        elif e.key in ["z", "a"]:
+            sign = 1 if e.key == "z" else -1
+            state["coordidx"] = (state["coordidx"] + len(coords[sidx]) + sign) % len(
+                coords[sidx]
+            )
+            zidx = coords[sidx][state["coordidx"]]
+            winlen = endidx - startidx
+            startidx = max(0, zidx - winsize // 2)
+            endidx = startidx + winlen
+            update_plot(sidx, startidx, endidx)
+
+        elif e.key in ["p", "q"]:
+            if e.key == "p":
+                sidx = (sidx + 1) % nseries
+                endidx -= startidx
+                startidx = 0
+            elif e.key == "q":
+                sidx = (sidx + nseries - 1) % nseries
+                startidx = npts - (endidx - startidx)
+                endidx = npts
+            state["zcrit"].remove()
+            zs = np.array([yh[sidx, zidx] for zidx in coords[sidx]])
+            state["zcrit"] = ax.scatter(*zs.T, label="z-critical", color="lime")
+            update_plot(sidx, startidx, endidx)
+
+        elif e.key == "h":
+            state["yt3d"].set_visible(not state["yt3d"].get_visible())
+            fig.canvas.draw_idle()
+            ax.set_title("")
 
         elif any([k in e.key for k in ["left", "right"]]):
             if "shift" in e.key:
@@ -162,22 +205,6 @@ def plot_3d(yh, yt, sidx, winsize, dt, scores, minimal=False):
 
             update_plot(sidx, startidx, endidx)
 
-        elif e.key == "p":
-            sidx = (sidx + 1) % nseries
-            endidx -= startidx
-            startidx = 0
-            update_plot(sidx, startidx, endidx)
-
-        elif e.key == "q":
-            sidx = (sidx + nseries - 1) % nseries
-            startidx = npts - (endidx - startidx)
-            endidx = npts
-            update_plot(sidx, startidx, endidx)
-        elif e.key == "h":
-            state["yt3d"].set_visible(not state["yt3d"].get_visible())
-            fig.canvas.draw_idle()
-            ax.set_title("")
-
     fig.canvas.mpl_connect(
         "key_press_event",
         partial(
@@ -187,6 +214,8 @@ def plot_3d(yh, yt, sidx, winsize, dt, scores, minimal=False):
             fig,
             ax,
             {
+                "zcrit": zcrit,
+                "coordidx": 0,
                 "sidx": sidx,
                 "startidx": startidx,
                 "endidx": endidx,
@@ -246,6 +275,21 @@ def print_minima(yhat, dt, nprint=10):
         )
 
 
+def collect_z_traj(yhat, zmin, zmax):
+    candidx = np.argwhere((yhat[:, :, 2] >= zmin) & (yhat[:, :, 2] <= zmax))
+    indices = defaultdict(list)
+    npts = yhat.shape[1]
+    for s, i in candidx:
+        if (
+            i > 0
+            and i < npts - 1
+            and yhat[s, i, 2] > yhat[s, i - 1, 2]
+            and yhat[s, i, 2] > yhat[s, i + 1, 2]
+        ):
+            indices[s].append(i)
+    return indices
+
+
 def statistics(model, solver, dt):
     def exp_k2(y, k=2):
         return np.exp(-(y[:, :, k].astype(np.float64) ** 2) / 2)
@@ -295,6 +339,20 @@ if __name__ == "__main__":
         default=False,
         help="compare model, Radau, and RK45 outputs",
     )
+
+    parser.add_argument(
+        "--zmin",
+        default=38.45,
+        type=float,
+        help="minimum z-coord value for z-based analysis",
+    )
+    parser.add_argument(
+        "--zmax",
+        default=38.6,
+        type=float,
+        help="maximum z-coord value for z-based analysis",
+    )
+
     parser.add_argument(
         "--npts", default=None, type=int, help="number of points per series to plot"
     )
@@ -337,7 +395,8 @@ if __name__ == "__main__":
 
     statistics(yhat, ytrue, dt)
     plot_compare_full(ytrue, yhat, 5, npts)
-    plot_3d(yhat, ytrue, args.series, winsize, dt, scores, args.minimal)
+    z_traj = collect_z_traj(yhat, args.zmin, args.zmax)
+    plot_3d(yhat, ytrue, z_traj, winsize, dt, args.minimal)
 
     plt.show()
     plt.close()
