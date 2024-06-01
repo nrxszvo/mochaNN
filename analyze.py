@@ -1,12 +1,14 @@
-from functools import partial
 import os
-import numpy as np
-from numpy.polynomial.polynomial import Polynomial
-import matplotlib.pyplot as plt
+from functools import partial
+
 import matplotlib.animation as animation
-from data_generation.utils import get_local_minima
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import tqdm
+from numpy.polynomial.polynomial import Polynomial
+
+from data_generation.utils import get_local_minima
 
 plt.rcParams["keymap.fullscreen"].remove("f")
 plt.rcParams["keymap.back"].remove("left")

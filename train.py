@@ -2,23 +2,25 @@ import argparse
 import os
 import shutil
 from datetime import datetime
+
 import lightning as L
 import numpy as np
 import torch
-from ncmdataset import NCMDataModule
-from ncm import NeuralChaosModule
 from ray import tune
-from ray.tune import CLIReporter
-from ray.train import RunConfig, ScalingConfig, CheckpointConfig
-from ray.train.torch import TorchTrainer
-from ray.tune.schedulers import ASHAScheduler
+from ray.train import CheckpointConfig, RunConfig, ScalingConfig
 from ray.train.lightning import (
     RayDDPStrategy,
     RayLightningEnvironment,
     RayTrainReportCallback,
     prepare_trainer,
 )
+from ray.train.torch import TorchTrainer
+from ray.tune import CLIReporter
+from ray.tune.schedulers import ASHAScheduler
+
 from config import get_config
+from ncm import NeuralChaosModule
+from ncmdataset import NCMDataModule
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--cfg", default="cfg.yml", help="yaml config file")

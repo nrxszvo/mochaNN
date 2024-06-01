@@ -4,9 +4,11 @@ channels:
   - nvidia
 dependencies:
   - python=3.11
-  - numpy
+  - numpy=1.21
   - pytorch
   - pytorch-cuda=12.1
   - lightning
   - ray-train
   - ray-tune
+  - matplotlib=3.7
+  - tqdm
