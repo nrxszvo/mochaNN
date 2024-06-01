@@ -2,9 +2,9 @@ random_seed: 42
 strategy: 'auto'
 dtype: 'float32'
 datafile: 'datasets/Lorenz_1Kx100K_t5_os200'
-ntrain: 97000
-nval: 1000 
-ntest: 2000
+ntrain: 9700
+nval: 100 
+ntest: 200
 npts: 1000
 H: 100 
 input_size: 200 
@@ -22,7 +22,6 @@ lr_scheduler_params:
   min_lr: 1.e-9
 loss: "MAE"
 nhits_params:
-  version: 2
   n_stacks: 4
   n_pool_kernel_size: [10,4,2,1]
   n_freq_downsample: [25,12,6,1]

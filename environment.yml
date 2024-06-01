@@ -11,4 +11,5 @@ dependencies:
   - ray-train
   - ray-tune
   - matplotlib=3.7
+  - scipy
   - tqdm

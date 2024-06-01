@@ -124,7 +124,6 @@ class NHITS(nn.Module):
         dropout_prob_theta=0.0,
         activation="ReLU",
         layer_norm=False,
-        version=1,
     ):
         super().__init__()
 
@@ -144,7 +143,6 @@ class NHITS(nn.Module):
         )
         self.blocks = torch.nn.ModuleList(blocks)
         self.norms = torch.nn.ModuleList(norms)
-        self.version = version
 
     def create_stack(
         self,
@@ -207,13 +205,10 @@ class NHITS(nn.Module):
 
         forecast = insample_y[:, -1:, None]  # Level with Naive1
         for block, norm in zip(self.blocks, self.norms):
-            if self.version == 2:
-                residuals = norm(residuals)
+            residuals = norm(residuals)
             backcast, block_forecast = block(
                 insample_y=residuals,
             )
             residuals = residuals - backcast
-            if self.version == 1:
-                residuals = norm(residuals)
             forecast = forecast + block_forecast
         return forecast.squeeze(2)
