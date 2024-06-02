@@ -1,3 +1,5 @@
+"""This source code is heavily derived from: https://github.com/Nixtla/neuralforecast"""
+
 from typing import Tuple
 
 import numpy as np
