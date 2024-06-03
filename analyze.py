@@ -8,7 +8,7 @@ import torch
 import tqdm
 from numpy.polynomial.polynomial import Polynomial
 
-from data_generation.utils import get_local_minima
+from data_generation.utils import get_local_minima, get_local_maxima
 
 plt.rcParams["keymap.fullscreen"].remove("f")
 plt.rcParams["keymap.back"].remove("left")
@@ -313,6 +313,92 @@ def plot_average_window_error_per_series(d, name, fig, ax):
     )
 
     fig.canvas.mpl_connect("key_press_event", partial(onkeypress, fig, ax, state))
+
+
+def plot_lorenz_map(ds):
+    xs_trans = []
+    ys_trans = []
+    xs_no_trans = []
+    ys_no_trans = []
+    state = {}
+    for d, name in ds:
+        state[name] = {"indices": []}
+        yt, yh = get_ys(d)
+        idx_trans = []
+        idx_no_trans = []
+        for s in range(yt.shape[0]):
+            pts, idx = get_local_maxima(yt[s, :, 2])
+            repeats = np.argwhere(idx[1:] - idx[:-1] == 1)
+            if repeats.shape[0] > 0:
+                idx = np.delete(idx, repeats)
+                pts = np.delete(pts, repeats)
+            signs = np.sign(yt[s, idx, 0])
+            indicators = np.convolve(signs, [1, -1], mode="valid")
+            lobe_trans = (np.argwhere(indicators != 0))[:, 0]
+            if lobe_trans[0] == 0:
+                lobe_trans = lobe_trans[1:]
+            no_trans = (np.argwhere(indicators == 0))[:, 0]
+            if no_trans[0] == 0:
+                no_trans = no_trans[1:]
+
+            xs_trans.extend(pts[lobe_trans - 1])
+            ys_trans.extend(pts[lobe_trans])
+            xs_no_trans.extend(pts[no_trans - 1])
+            ys_no_trans.extend(pts[no_trans])
+            idx_trans.extend([(s, i) for i in idx[lobe_trans]])
+            idx_no_trans.extend([(s, i) for i in idx[no_trans]])
+
+        state[name]["data"] = (
+            xs_trans,
+            ys_trans,
+            xs_no_trans,
+            ys_no_trans,
+            idx_trans,
+            idx_no_trans,
+            d["stride"],
+        )
+
+    fig, ax = plt.subplots()
+    ax.scatter(xs_no_trans, ys_no_trans, s=0.2, label="no transition")
+    ax.scatter(xs_trans, ys_trans, s=0.2, label="lobe transition")
+    ax.set_title("Lorenz Map")
+    ax.set_ylabel("Zmax(n+1)")
+    ax.set_xlabel("Zmax(n)")
+    ax.legend()
+
+    # double click opens 3d plot of corresponding window
+    def onclick(state, e):
+        if e.inaxes is ax:
+            if e.dblclick:
+                zx = e.xdata
+                zy = e.ydata
+                for name in state:
+                    (
+                        xs_trans,
+                        ys_trans,
+                        xs_no_trans,
+                        ys_no_trans,
+                        idx_trans,
+                        idx_no_trans,
+                        stride,
+                    ) = state[name]["data"]
+                    err_trans = (zx - xs_trans) ** 2 + (zy - ys_trans) ** 2
+                    err_no_trans = (zx - xs_no_trans) ** 2 + (zy - ys_no_trans) ** 2
+                    if err_trans.min() < err_no_trans.min():
+                        selected = np.argmin(err_trans)
+                        sidx, widx = idx_trans[selected]
+                    else:
+                        selected = np.argmin(err_no_trans)
+                        sidx, widx = idx_no_trans[selected]
+                    widx = widx // stride
+                    plot_3d(d, name, sidx, widx)
+                plt.show()
+
+    fig.canvas.mpl_connect(
+        "button_press_event",
+        partial(onclick, state),
+    )
+    plt.show()
 
 
 def plot_dist(ds):
@@ -825,7 +911,7 @@ if __name__ == "__main__":
     available = collect_available(args.pattern, args.dirname)
 
     while True:
-        opt = input("enter dist|info|trajectories: ")
+        opt = input("enter dist|info|trajectories|lorenz_map: ")
 
         if opt == "dist":
             choices_menu(available, plot_dist, load_map)
@@ -833,5 +919,7 @@ if __name__ == "__main__":
             choices_menu(available, print_metadata, load_map)
         elif opt == "trajectories":
             plot_trajectories_menu(available, load_map)
+        elif opt == "lorenz_map":
+            choices_menu(available, plot_lorenz_map, load_map)
         else:
             break
